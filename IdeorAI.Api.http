@@ -1,0 +1,6 @@
+@IdeorAI.Api_HostAddress = http://localhost:5110
+
+GET {{IdeorAI.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
