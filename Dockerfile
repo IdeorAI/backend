@@ -5,12 +5,12 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # 1) Copia só o csproj p/ cache de restore
-COPY IdeorAI.Api/IdeorAI.Api.csproj IdeorAI.Api/
-RUN dotnet restore IdeorAI.Api/IdeorAI.Api.csproj
+COPY *.csproj ./
+RUN dotnet restore
 
 # 2) Copia o restante e publica
 COPY . .
-RUN dotnet publish IdeorAI.Api/IdeorAI.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 
 # ===========================
 # RUNTIME
