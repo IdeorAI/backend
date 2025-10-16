@@ -84,16 +84,21 @@ builder.Services.AddOpenTelemetry()
                     activity.SetTag("external.system", "gemini");
                 };
                 options.RecordException = true;
-            })
-            // ✅ OTLP Exporter com configuração padronizada
-            .AddOtlpExporter(otlpOptions =>
+            });
+
+            // ✅ OTLP Exporter - apenas se configurado
+            var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
+            if (!string.IsNullOrWhiteSpace(otlpEndpoint) && Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var otlpUri))
             {
-                var endpoint = builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317";
-                otlpOptions.Endpoint = new Uri(endpoint);
-                otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
-            })
-            // Manter console exporter para debugging
-            .AddConsoleExporter();
+                tracing.AddOtlpExporter(otlpOptions =>
+                {
+                    otlpOptions.Endpoint = otlpUri;
+                    otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
+                });
+            }
+
+            // Console exporter para debugging
+            tracing.AddConsoleExporter();
     });
 
 // Configuração do OpenTelemetry para logs
@@ -103,13 +108,17 @@ builder.Services.AddLogging(logging =>
     {
         options.SetResourceBuilder(resourceBuilder);
         options.AddConsoleExporter();
-        // ✅ Adicionar OTLP para logs também
-        options.AddOtlpExporter(otlpOptions =>
+
+        // ✅ OTLP para logs - apenas se configurado
+        var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint) && Uri.TryCreate(otlpEndpoint, UriKind.Absolute, out var otlpUri))
         {
-            var endpoint = builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317";
-            otlpOptions.Endpoint = new Uri(endpoint);
-            otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
-        });
+            options.AddOtlpExporter(otlpOptions =>
+            {
+                otlpOptions.Endpoint = otlpUri;
+                otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
+            });
+        }
     });
 });
 
