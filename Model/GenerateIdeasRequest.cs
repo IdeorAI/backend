@@ -16,6 +16,18 @@ namespace IdeorAI.Model
         /// Opcional — por padrão 4. Mantido flexível para A/B tests.
         /// </summary>
         public int? Count { get; set; }
+        /// <summary>
+        /// ID do projeto para salvar as ideias geradas (opcional)
+        /// </summary>
+        public string? ProjectId { get; set; }
+        /// <summary>
+        /// ID do owner do projeto (fallback se ProjectId não estiver presente)
+        /// </summary>
+        public string? OwnerId { get; set; }
+        /// <summary>
+        /// Categoria/segmento selecionado para salvar no projeto
+        /// </summary>
+        public string? Category { get; set; }
     }
 }
 

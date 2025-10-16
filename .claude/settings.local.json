@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyCtFA1NB0AFNHWd7R9KpZ7SSPC7L23Q-zs\" -H \"Content-Type: application/json\" -d \"{\"\"contents\"\":[{\"\"parts\"\":[{\"\"text\"\":\"\"ola\"\"}]}]}\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

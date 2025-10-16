@@ -12,6 +12,7 @@ using Serilog.Context;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.Metrics;
 using IdeorAI.Services;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,7 +22,7 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.WithProperty("Application", "IdeorAI.Backend")
     .Enrich.WithProperty("Environment", builder.Environment.EnvironmentName)
     .WriteTo.Console(new CompactJsonFormatter())
-    .WriteTo.File(new CompactJsonFormatter(), 
+    .WriteTo.File(new CompactJsonFormatter(),
         path: "logs/log-.json",
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 7)
@@ -84,11 +85,12 @@ builder.Services.AddOpenTelemetry()
                 };
                 options.RecordException = true;
             })
-            // ✅ Alterado para OTLP (mais moderno e compatível)
+            // ✅ OTLP Exporter com configuração padronizada
             .AddOtlpExporter(otlpOptions =>
             {
-                otlpOptions.Endpoint = new Uri("http://jaeger:4317");
-                otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+                var endpoint = builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317";
+                otlpOptions.Endpoint = new Uri(endpoint);
+                otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
             })
             // Manter console exporter para debugging
             .AddConsoleExporter();
@@ -104,8 +106,9 @@ builder.Services.AddLogging(logging =>
         // ✅ Adicionar OTLP para logs também
         options.AddOtlpExporter(otlpOptions =>
         {
-            otlpOptions.Endpoint = new Uri(builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317");
-            otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.HttpProtobuf;
+            var endpoint = builder.Configuration["Otlp:Endpoint"] ?? "http://localhost:4317";
+            otlpOptions.Endpoint = new Uri(endpoint);
+            otlpOptions.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
         });
     });
 });
@@ -118,17 +121,63 @@ if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException("Gemini API key is not configured. Please set the 'Gemini:ApiKey' configuration value.");
 }
 
+//validaçao da Api Key do supabase
+var supabaseUrl = builder.Configuration["Supabase:Url"];
+var supabaseServiceKey = builder.Configuration["Supabase:ServiceRoleKey"];
+
+if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(supabaseServiceKey))
+{
+    throw new InvalidOperationException("Supabase config missing. Set 'Supabase:Url' and 'Supabase:ServiceRoleKey'.");
+}
+
+
 // Registrar métricas personalizadas
 builder.Services.AddSingleton<BackendMetrics>();
 
-// Registrar GeminiApiClient com as dependências corretas
-builder.Services.AddSingleton(provider =>
-    new GeminiApiClient(
-        apiKey!,
-        provider.GetRequiredService<BackendMetrics>(),
-        provider.GetRequiredService<ILogger<GeminiApiClient>>()
-    )
-);
+
+// GeminiApiClient via HttpClientFactory (timeout + headers default)
+builder.Services.AddHttpClient<GeminiApiClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30); // Aumentado para 30s
+    client.DefaultRequestHeaders.Accept.Clear();
+    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+    var handler = new SocketsHttpHandler
+    {
+        // Configurações de pool de conexões
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+
+        // Configurações de DNS
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+
+        // Configurações de proxy
+        UseProxy = true,
+
+        // Permitir certificados SSL inválidos em desenvolvimento (remover em produção)
+        SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true
+        }
+    };
+    return handler;
+});
+
+builder.Services.AddHttpClient("supabase", client =>
+{
+    client.BaseAddress = new Uri($"{supabaseUrl!.TrimEnd('/')}/rest/v1/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.Accept.Clear();
+    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    // Autenticação do PostgREST
+    client.DefaultRequestHeaders.Add("apikey", supabaseServiceKey);
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", supabaseServiceKey);
+    // Para retornar a linha atualizada (útil para logs/validação)
+    client.DefaultRequestHeaders.Add("Prefer", "return=representation");
+});
+
 
 // Registrar serviços instrumentados
 builder.Services.AddSingleton<InstrumentedGeminiService>();
@@ -157,7 +206,7 @@ app.Use(async (context, next) =>
     var requestId = context.Request.Headers["x-request-id"].FirstOrDefault() ?? Guid.NewGuid().ToString();
     context.Response.Headers["x-request-id"] = requestId;
     context.Items["RequestId"] = requestId;
-    
+
     // Adicionar ao contexto de log
     using (LogContext.PushProperty("RequestId", requestId))
     using (LogContext.PushProperty("UserId", context.User?.Identity?.Name ?? "anonymous"))
@@ -169,22 +218,21 @@ app.Use(async (context, next) =>
         {
             await next();
             stopwatch.Stop();
-            
-            Log.Information("Request completed - Status: {StatusCode}, Latency: {LatencyMs}ms", 
+
+            Log.Information("Request completed - Status: {StatusCode}, Latency: {LatencyMs}ms",
                 context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Log.Error(ex, "Request failed - Status: {StatusCode}, Latency: {LatencyMs}ms", 
+            Log.Error(ex, "Request failed - Status: {StatusCode}, Latency: {LatencyMs}ms",
                 context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
             throw;
         }
     }
 });
 
-// ✅ CORREÇÃO: Remover esta linha duplicada
-// app.UseMiddleware<RequestIdMiddleware>(); // Já está implementado acima
+
 
 // Configurar endpoint Prometheus
 app.UseOpenTelemetryPrometheusScrapingEndpoint();
@@ -194,7 +242,7 @@ app.UseCors(FrontendCors);
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    //app.UseSwagger(); // ✅ Adicionar UseSwagger() faltando
+    app.UseSwagger();
     app.UseSwaggerUI();
 }
 

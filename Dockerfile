@@ -18,12 +18,10 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 
-# Render define PORT dinamicamente. Ligue o Kestrel nisso.
+# Kestrel deve escutar em todas as interfaces para aceitar requests do Prometheus/Docker
 ENV PORT=8080
-ENV ASPNETCORE_URLS=http://0.0.0.0:${PORT}
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
-# (opcional) melhora cold start e desativa diagnóstico em prod
-ENV DOTNET_EnableDiagnostics=0
 
 COPY --from=build /app/publish ./
 EXPOSE 8080

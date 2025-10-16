@@ -9,36 +9,66 @@ using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading;
+using Microsoft.Extensions.Configuration;
 
 namespace IdeorAI.Client
 {
     public class GeminiApiClient
     {
-        private readonly HttpClient _httpClient;
+        private readonly HttpClient _http;
         private readonly string _apiKey;
         private readonly BackendMetrics _metrics;
         private readonly ILogger<GeminiApiClient> _logger;
         private readonly ActivitySource _activitySource;
 
-        public GeminiApiClient(string apiKey, BackendMetrics metrics, ILogger<GeminiApiClient> logger)
+        public GeminiApiClient(
+       HttpClient http,                     // vem do HttpClientFactory
+       BackendMetrics metrics,
+       ILogger<GeminiApiClient> logger,
+       IConfiguration config                // para ler a API key
+   )
         {
-            _httpClient = new HttpClient();
-            _apiKey = apiKey;
+            _http = http;
+
+            // (fallback) timeout local — também deixaremos configurado no Program.cs
+            if (_http.Timeout == Timeout.InfiniteTimeSpan)
+                _http.Timeout = TimeSpan.FromSeconds(20);
+
+            // Aceitar JSON por padrão
+            _http.DefaultRequestHeaders.Accept.Clear();
+            _http.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json")
+            );
+
+            // Se quiser, pode definir a BaseAddress aqui ou no Program.cs
+            // _http.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+
+            // Lê a API key do appsettings / secret / env
+            _apiKey = config["Gemini:ApiKey"]
+                      ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+                      ?? throw new InvalidOperationException("Gemini API key not configured.");
+
             _metrics = metrics;
             _logger = logger;
             _activitySource = new ActivitySource("IdeorAI.Service");
         }
 
-        public async Task<string> GenerateContentAsync(string prompt)
+        public async Task<string> GenerateContentAsync(string prompt, CancellationToken ct = default)
+
         {
             using var activity = _activitySource.StartActivity("Gemini.GenerateContent");
             // Removido o using problemático do RequestsInFlight
             _metrics.RequestsInFlight.Add(1);
-            
+
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+                const string model = "gemini-2.5-flash";
+                string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
+
                 var request = new ContentRequest
                 {
                     contents = new[]
@@ -55,11 +85,11 @@ namespace IdeorAI.Client
                         }
                     }
                 };
-                
+
                 string jsonRequest = JsonConvert.SerializeObject(request);
                 var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
-                HttpResponseMessage response = await _httpClient.PostAsync(url, content);
+                HttpResponseMessage response = await _http.PostAsync(url, content, ct);
                 stopwatch.Stop();
 
                 // Registrar métricas
@@ -80,6 +110,22 @@ namespace IdeorAI.Client
                     throw new Exception("Error communicating with Gemini API.");
                 }
             }
+            catch (HttpRequestException ex)
+            {
+                stopwatch.Stop();
+                _metrics.GeminiErrors.Add(1,
+                    new KeyValuePair<string, object?>("code", "http_exception"));
+                _logger.LogError(ex, "Erro de rede ao chamar API do Gemini. Verifique conexão com a internet e configurações de proxy/firewall.");
+                throw new Exception($"Erro de rede ao conectar com API do Gemini: {ex.Message}. Verifique sua conexão com a internet.", ex);
+            }
+            catch (TaskCanceledException ex)
+            {
+                stopwatch.Stop();
+                _metrics.GeminiErrors.Add(1,
+                    new KeyValuePair<string, object?>("code", "timeout"));
+                _logger.LogError(ex, "Timeout ao chamar API do Gemini");
+                throw new Exception("Timeout ao conectar com API do Gemini. A requisição demorou muito tempo.", ex);
+            }
             catch (Exception ex)
             {
                 stopwatch.Stop();
@@ -94,12 +140,12 @@ namespace IdeorAI.Client
             }
         }
 
-        public async Task<List<string>> GenerateStartupIdeasAsync(string seedIdea, string segmentDescription)
+        public async Task<List<string>> GenerateStartupIdeasAsync(string seedIdea, string segmentDescription, CancellationToken ct = default)
         {
             using var activity = _activitySource.StartActivity("Gemini.GenerateIdeas");
             // Removido o using problemático do RequestsInFlight
             _metrics.RequestsInFlight.Add(1);
-            
+
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
@@ -143,16 +189,18 @@ namespace IdeorAI.Client
                     {
                         temperature = 0.3,
                         topP = 0.6,
-                        maxOutputTokens = 512,
+                        maxOutputTokens = 2048,
                         response_mime_type = "application/json"
                     }
                 };
 
-                string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+                const string model = "gemini-2.5-flash";
+                string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
+
                 string jsonRequest = JsonConvert.SerializeObject(requestObj);
                 var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.PostAsync(url, content);
+                var response = await _http.PostAsync(url, content, ct);
                 stopwatch.Stop();
 
                 // Registrar métricas
@@ -163,14 +211,43 @@ namespace IdeorAI.Client
                 {
                     _metrics.GeminiErrors.Add(1,
                         new KeyValuePair<string, object?>("code", response.StatusCode.ToString()));
-                    _logger.LogError("Gemini API error: {StatusCode}", response.StatusCode);
-                    throw new Exception($"Gemini retornou {response.StatusCode}");
+                    var errorBody = await response.Content.ReadAsStringAsync();
+                    _logger.LogError("Gemini API error: {StatusCode}, Body: {ErrorBody}", response.StatusCode, errorBody);
+                    throw new Exception($"Gemini retornou {response.StatusCode}: {errorBody}");
                 }
 
                 string jsonResponse = await response.Content.ReadAsStringAsync();
 
+                // Log da resposta para debug
+                _logger.LogInformation("Gemini raw response (GenerateStartupIdeasAsync): {Response}", jsonResponse);
+
                 var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
-                var text = gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? "";
+
+                // Verificar se há conteúdo válido
+                if (gemini?.Candidates == null || gemini.Candidates.Length == 0)
+                {
+                    _logger.LogError("Gemini retornou resposta sem candidates");
+                    throw new Exception("Resposta do Gemini não contém candidatos.");
+                }
+
+                var candidate = gemini.Candidates[0];
+
+                // Verificar finishReason
+                if (candidate.FinishReason == "MAX_TOKENS")
+                {
+                    _logger.LogWarning("Gemini atingiu MAX_TOKENS. Resposta pode estar incompleta.");
+                }
+
+                var text = candidate?.Content?.Parts?[0]?.Text ?? "";
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    _logger.LogError("Gemini retornou resposta sem texto. FinishReason: {FinishReason}", candidate?.FinishReason);
+                    throw new Exception($"Resposta do Gemini vazia. Razão: {candidate?.FinishReason ?? "desconhecida"}");
+                }
+
+                _logger.LogInformation("Gemini text (GenerateStartupIdeasAsync): {Text}", text);
+
                 text = StripCodeFences(text);
                 var parsed = JsonConvert.DeserializeObject<GenerateIdeasResponse>(text);
 
@@ -188,8 +265,24 @@ namespace IdeorAI.Client
                 if (ideas.Count != 3)
                     throw new Exception("O modelo não retornou 3 ideias.");
 
-                Console.WriteLine($"Resposta bruta do Gemini: {jsonResponse}");
+                _logger.LogDebug($"Resposta bruta do Gemini: {jsonResponse}");
                 return ideas;
+            }
+            catch (HttpRequestException ex)
+            {
+                stopwatch.Stop();
+                _metrics.GeminiErrors.Add(1,
+                    new KeyValuePair<string, object?>("code", "http_exception"));
+                _logger.LogError(ex, "Erro de rede ao chamar API do Gemini (GenerateStartupIdeasAsync). Verifique conexão com a internet e configurações de proxy/firewall.");
+                throw new Exception($"Erro de rede ao conectar com API do Gemini: {ex.Message}. Verifique sua conexão com a internet.", ex);
+            }
+            catch (TaskCanceledException ex)
+            {
+                stopwatch.Stop();
+                _metrics.GeminiErrors.Add(1,
+                    new KeyValuePair<string, object?>("code", "timeout"));
+                _logger.LogError(ex, "Timeout ao chamar API do Gemini (GenerateStartupIdeasAsync)");
+                throw new Exception("Timeout ao conectar com API do Gemini. A requisição demorou muito tempo.", ex);
             }
             catch (Exception ex)
             {
@@ -220,7 +313,8 @@ namespace IdeorAI.Client
             string systemInstruction,
             string userText,
             int expectedCount,
-            int maxCharsPerIdea = 400)
+            int maxCharsPerIdea = 400,
+            CancellationToken ct = default)
         {
             var requestObj = new
             {
@@ -245,11 +339,13 @@ namespace IdeorAI.Client
                 }
             };
 
-            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+            const string model = "gemini-2.5-flash";
+            string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
+
             string jsonRequest = JsonConvert.SerializeObject(requestObj);
             var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(url, content);
+            var response = await _http.PostAsync(url, content, ct);
             if (!response.IsSuccessStatusCode)
                 throw new Exception($"Gemini retornou {response.StatusCode}");
 
@@ -275,9 +371,10 @@ namespace IdeorAI.Client
             if (ideas.Count > expectedCount)
                 ideas = ideas.Take(expectedCount).ToList();
 
-            Console.WriteLine($"Gemini raw: {jsonResponse}");
-            Console.WriteLine($"Gemini text: {text}");
-            Console.WriteLine($"Ideias geradas: {ideas.Count}");
+            _logger.LogDebug("Gemini raw: {Json}", jsonResponse);
+            _logger.LogDebug("Gemini text: {Text}", text);
+            _logger.LogDebug("Ideias geradas: {Count}", ideas.Count);
+
             return ideas;
         }
 
@@ -287,22 +384,22 @@ namespace IdeorAI.Client
         /// com título limitado a 6 palavras e total ≤ 400 caracteres.
         /// Parser tolera string[], objetos {title, subtitle} e strings com objetos JSON dentro.
         /// </summary>
-        public async Task<List<string>> GenerateSegmentIdeasAsync(string segmentDescription, int count = 4)
+        public async Task<List<string>> GenerateSegmentIdeasAsync(string segmentDescription, int count = 4, CancellationToken ct = default)
         {
             string segment = (segmentDescription ?? "").Trim();
             if (segment.Length > 400) segment = segment.Substring(0, 400);
 
-            var systemInstruction = @$"Você é um gerador de ideias de startups.
-Gere exatamente {count} ideias inovadoras, cada uma com no máximo 400 caracteres.
-Cada ideia deve tendrá um TÍTULO (no máximo 6 palavras) e um SUBTÍTULO descritivo (1–2 frases curtas).
-Retorne APENAS JSON com o formato PREFERENCIAL:
-{{ ""ideas"": [ {{ ""title"": ""..."", ""subtitle"": ""..."" }}, ... ] }}
-Se não for possível, retorne como lista de strings já no formato ""Título — Subtítulo"".
-Não use markdown, nem comentários. Evite usar dois pontos (:) no título.";
+            var systemInstruction = $@"Você é um gerador de ideias de startups.
+Gere {count} ideias inovadoras para o segmento fornecido.
+Retorne APENAS um JSON válido no formato:
+{{""ideas"":[{{""title"":""Título curto"",""subtitle"":""Descrição breve""}}]}}
+Cada título deve ter no máximo 6 palavras.
+Cada subtítulo deve ter 1-2 frases curtas.
+Total por ideia: máximo 400 caracteres.";
 
             var userText = $@"SEGMENTO: ""{segment}""";
 
-            return await GenerateIdeasCoreFlexibleAsync(systemInstruction, userText, expectedCount: count);
+            return await GenerateIdeasCoreFlexibleAsync(systemInstruction, userText, expectedCount: count, ct: ct);
         }
 
         // ========= Núcleo "flexível" para objetos/string, com pós-processamento =========
@@ -311,7 +408,8 @@ Não use markdown, nem comentários. Evite usar dois pontos (:) no título.";
             string systemInstruction,
             string userText,
             int expectedCount,
-            int maxCharsPerIdea = 400)
+            int maxCharsPerIdea = 400,
+            CancellationToken ct = default)
         {
             var requestObj = new
             {
@@ -331,23 +429,57 @@ Não use markdown, nem comentários. Evite usar dois pontos (:) no título.";
                 {
                     temperature = 0.5,
                     topP = 0.9,
-                    maxOutputTokens = 768,
+                    maxOutputTokens = 2048,
                     response_mime_type = "application/json"
                 }
             };
 
-            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+            const string model = "gemini-2.5-flash";
+            string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
+
             string jsonRequest = JsonConvert.SerializeObject(requestObj);
             var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(url, content);
+            var response = await _http.PostAsync(url, content, ct);
+
             if (!response.IsSuccessStatusCode)
                 throw new Exception($"Gemini retornou {response.StatusCode}");
 
             string jsonResponse = await response.Content.ReadAsStringAsync();
+
+            // Log da resposta completa do Gemini para debug
+            _logger.LogInformation("Gemini raw response: {Response}", jsonResponse);
+
             var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
-            var rawText = gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? "";
+
+            // Verificar se há conteúdo válido
+            if (gemini?.Candidates == null || gemini.Candidates.Length == 0)
+            {
+                _logger.LogError("Gemini retornou resposta sem candidates");
+                throw new Exception("Resposta do Gemini não contém candidatos.");
+            }
+
+            var candidate = gemini.Candidates[0];
+
+            // Verificar finishReason
+            if (candidate.FinishReason == "MAX_TOKENS")
+            {
+                _logger.LogWarning("Gemini atingiu MAX_TOKENS. Resposta pode estar incompleta.");
+            }
+
+            var rawText = candidate?.Content?.Parts?[0]?.Text ?? "";
+
+            if (string.IsNullOrWhiteSpace(rawText))
+            {
+                _logger.LogError("Gemini retornou resposta sem texto. FinishReason: {FinishReason}", candidate?.FinishReason);
+                throw new Exception($"Resposta do Gemini vazia. Razão: {candidate?.FinishReason ?? "desconhecida"}");
+            }
+
+            _logger.LogInformation("Gemini raw text (before strip): {RawText}", rawText);
+
             var text = StripCodeFences(rawText);
+
+            _logger.LogInformation("Gemini text (after strip): {Text}", text);
 
             var combined = ParseFlexibleIdeasToCombinedStrings(text, expectedCount, maxCharsPerIdea);
 
@@ -356,8 +488,9 @@ Não use markdown, nem comentários. Evite usar dois pontos (:) no título.";
             if (combined.Count > expectedCount)
                 combined = combined.Take(expectedCount).ToList();
 
-            Console.WriteLine($"Gemini text: {text}");
-            Console.WriteLine($"Ideias (combined): {string.Join(" | ", combined)}");
+            _logger.LogDebug("Gemini text: {Text}", text);
+            _logger.LogDebug("Ideias (combined): {Ideas}", string.Join(" | ", combined));
+
 
             if (combined.Count == 0)
                 throw new Exception("Resposta do modelo não pôde ser interpretada.");
@@ -546,8 +679,8 @@ Não use markdown, nem comentários. Evite usar dois pontos (:) no título.";
             public string? Subtitle { get; set; }
         }
 
-       
-       
+
+
 
     }
 }

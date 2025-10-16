@@ -7,7 +7,7 @@ namespace IdeorAI.Services
     public class InstrumentedGeminiService
     {
         private readonly GeminiApiClient _geminiClient;
-        private static readonly ActivitySource GeminiActivitySource = new("Gemini");
+        private static readonly ActivitySource GeminiActivitySource = new("IdeorAI.Service");
         private readonly ILogger<InstrumentedGeminiService> _logger;
 
         public InstrumentedGeminiService(GeminiApiClient geminiClient, ILogger<InstrumentedGeminiService> logger)
@@ -19,7 +19,7 @@ namespace IdeorAI.Services
         public async Task<string> GenerateContentAsync(string prompt)
         {
             using var activity = GeminiActivitySource.StartActivity("Gemini.GenerateContent");
-            activity?.SetTag("ai.model", "gemini-pro");
+            activity?.SetTag("ai.model", "gemini-1.5-flash");
             activity?.SetTag("ai.prompt_length", prompt.Length);
             
             try
