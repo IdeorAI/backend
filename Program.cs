@@ -197,7 +197,7 @@ builder.Services.AddCors(opt =>
 {
     opt.AddPolicy(FrontendCors, p =>
     {
-        p.WithOrigins("http://localhost:3000", "https://front-end-plum-nu.vercel.app")
+        p.WithOrigins("http://localhost:3000", "https://frontend-two-chi-24.vercel.app")
          .AllowAnyMethod()
          .AllowAnyHeader()
          .WithExposedHeaders("Content-Disposition", "x-request-id");
