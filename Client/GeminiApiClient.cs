@@ -46,9 +46,10 @@ namespace IdeorAI.Client
             // Se quiser, pode definir a BaseAddress aqui ou no Program.cs
             // _http.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
 
-            // Lê a API key do appsettings / secret / env
-            var rawApiKey = config["Gemini:ApiKey"]
-                      ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+            // Lê a API key - PRIORIDADE: Variável de ambiente > appsettings
+            // Isso permite sobrescrever a key em produção sem alterar código
+            var rawApiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY")
+                      ?? config["Gemini:ApiKey"]
                       ?? throw new InvalidOperationException("Gemini API key not configured.");
 
             // Log para debug (apenas primeiros e últimos 4 caracteres por segurança)
