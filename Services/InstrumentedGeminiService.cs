@@ -19,7 +19,7 @@ namespace IdeorAI.Services
         public async Task<string> GenerateContentAsync(string prompt)
         {
             using var activity = GeminiActivitySource.StartActivity("Gemini.GenerateContent");
-            activity?.SetTag("ai.model", "gemini-1.5-flash");
+            activity?.SetTag("ai.model", "gemini-2.5-flash");
             activity?.SetTag("ai.prompt_length", prompt.Length);
             
             try
