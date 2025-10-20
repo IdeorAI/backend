@@ -51,8 +51,23 @@ namespace IdeorAI.Client
                       ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
                       ?? throw new InvalidOperationException("Gemini API key not configured.");
 
+            // Log para debug (apenas primeiros e últimos 4 caracteres por segurança)
+            logger.LogInformation("=== GEMINI API KEY DEBUG ===");
+            logger.LogInformation("Raw API Key length: {Length}", rawApiKey?.Length ?? 0);
+            logger.LogInformation("Raw API Key first 10 chars: {First}", rawApiKey?.Length >= 10 ? rawApiKey.Substring(0, 10) : rawApiKey);
+            logger.LogInformation("Raw API Key last 10 chars: {Last}", rawApiKey?.Length >= 10 ? rawApiKey.Substring(rawApiKey.Length - 10) : rawApiKey);
+            logger.LogInformation("Raw API Key has whitespace: {HasWhitespace}", rawApiKey?.Any(char.IsWhiteSpace) ?? false);
+            logger.LogInformation("Raw API Key has newline: {HasNewline}", rawApiKey?.Contains('\n') ?? false);
+
             // Sanitizar a API key removendo espaços, newlines, tabs (problema comum em plataformas de deploy)
             _apiKey = System.Text.RegularExpressions.Regex.Replace(rawApiKey, @"[\s\n\r\t]", "");
+
+            // Log da key sanitizada
+            logger.LogInformation("Sanitized API Key length: {Length}", _apiKey?.Length ?? 0);
+            logger.LogInformation("Sanitized API Key first 10 chars: {First}", _apiKey?.Length >= 10 ? _apiKey.Substring(0, 10) : _apiKey);
+            logger.LogInformation("Sanitized API Key last 10 chars: {Last}", _apiKey?.Length >= 10 ? _apiKey.Substring(_apiKey.Length - 10) : _apiKey);
+            logger.LogInformation("Characters removed: {Removed}", (rawApiKey?.Length ?? 0) - (_apiKey?.Length ?? 0));
+            logger.LogInformation("===========================");
 
             _metrics = metrics;
             _logger = logger;
@@ -199,6 +214,10 @@ namespace IdeorAI.Client
 
                 const string model = "gemini-2.5-flash";
                 string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
+
+                // Debug: Log da URL (sem mostrar key completa)
+                _logger.LogInformation("Calling Gemini API - Key length in URL: {KeyLength}, URL length: {UrlLength}", _apiKey?.Length ?? 0, url?.Length ?? 0);
+                _logger.LogInformation("URL first 100 chars: {UrlStart}", url?.Length >= 100 ? url.Substring(0, 100) : url);
 
                 string jsonRequest = JsonConvert.SerializeObject(requestObj);
                 var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
