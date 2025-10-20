@@ -47,9 +47,12 @@ namespace IdeorAI.Client
             // _http.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
 
             // Lê a API key do appsettings / secret / env
-            _apiKey = config["Gemini:ApiKey"]
+            var rawApiKey = config["Gemini:ApiKey"]
                       ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY")
                       ?? throw new InvalidOperationException("Gemini API key not configured.");
+
+            // Sanitizar a API key removendo espaços, newlines, tabs (problema comum em plataformas de deploy)
+            _apiKey = System.Text.RegularExpressions.Regex.Replace(rawApiKey, @"[\s\n\r\t]", "");
 
             _metrics = metrics;
             _logger = logger;
