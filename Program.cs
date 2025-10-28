@@ -1,6 +1,9 @@
 using IdeorAI.Client;
+using IdeorAI.Data;
+using IdeorAI.Services;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Formatting.Compact;
 using OpenTelemetry;
@@ -11,7 +14,6 @@ using OpenTelemetry.Logs;
 using Serilog.Context;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.Metrics;
-using IdeorAI.Services;
 using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,6 +34,37 @@ builder.Host.UseSerilog();
 
 // Add services to the container.
 builder.Services.AddControllers();
+
+// ========== EF CORE + SUPABASE POSTGRESQL ==========
+var connectionString = builder.Configuration.GetConnectionString("SupabaseConnection");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Database connection string is not configured. Please set 'ConnectionStrings:SupabaseConnection'.");
+}
+
+builder.Services.AddDbContext<IdeorDbContext>(options =>
+{
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(5),
+            errorCodesToAdd: null);
+    });
+
+    // Logging de queries SQL em desenvolvimento
+    if (builder.Environment.IsDevelopment())
+    {
+        options.EnableSensitiveDataLogging();
+        options.EnableDetailedErrors();
+    }
+});
+
+// Registrar serviços de negócio
+builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<IStageService, StageService>();
+builder.Services.AddScoped<IDocumentGenerationService, DocumentGenerationService>();
 
 // Configuração do OpenTelemetry
 var resourceBuilder = ResourceBuilder.CreateDefault()

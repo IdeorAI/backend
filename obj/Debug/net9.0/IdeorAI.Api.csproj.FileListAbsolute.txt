@@ -191,3 +191,4 @@ G:\IdeorAI\backend\IdeorAI.Api\obj\Debug\net9.0\IdeorAI.Api.genruntimeconfig.cac
 G:\IdeorAI\backend\IdeorAI.Api\obj\Debug\net9.0\ref\IdeorAI.Api.dll
 G:\IdeorAI\backend\IdeorAI.Api\bin\Debug\net9.0\logs\log-20251015.json
 G:\IdeorAI\backend\IdeorAI.Api\bin\Debug\net9.0\logs\log-20251016.json
+G:\IdeorAI\backend\IdeorAI.Api\bin\Debug\net9.0\appsettings.Production.json
