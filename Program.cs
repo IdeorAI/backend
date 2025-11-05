@@ -65,6 +65,7 @@ builder.Services.AddDbContext<IdeorDbContext>(options =>
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IStageService, StageService>();
 builder.Services.AddScoped<IDocumentGenerationService, DocumentGenerationService>();
+builder.Services.AddScoped<IPdfExportService, PdfExportService>();
 
 // Configuração do OpenTelemetry
 var resourceBuilder = ResourceBuilder.CreateDefault()

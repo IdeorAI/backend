@@ -13,13 +13,16 @@ namespace IdeorAI.Controllers;
 public class DocumentsController : ControllerBase
 {
     private readonly IDocumentGenerationService _documentService;
+    private readonly IPdfExportService _pdfExportService;
     private readonly ILogger<DocumentsController> _logger;
 
     public DocumentsController(
         IDocumentGenerationService documentService,
+        IPdfExportService pdfExportService,
         ILogger<DocumentsController> logger)
     {
         _documentService = documentService;
+        _pdfExportService = pdfExportService;
         _logger = logger;
     }
 
@@ -113,6 +116,28 @@ public class DocumentsController : ControllerBase
             TokensUsed = EstimateTokens(task.Content ?? ""),
             Status = task.Status
         });
+    }
+
+    /// <summary>
+    /// Exporta todos os documentos do projeto em formato PDF
+    /// </summary>
+    [HttpGet("export/pdf")]
+    public async Task<IActionResult> ExportToPdf(
+        Guid projectId,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        _logger.LogInformation("Exporting documents to PDF for project {ProjectId}", projectId);
+
+        var pdfBytes = await _pdfExportService.ExportProjectDocumentsAsync(projectId, userId);
+
+        if (pdfBytes == null)
+        {
+            return NotFound(new { error = "No documents found for this project or access denied" });
+        }
+
+        var fileName = $"Relatorio_Projeto_{projectId}_{DateTime.Now:yyyyMMdd}.pdf";
+
+        return File(pdfBytes, "application/pdf", fileName);
     }
 
     private int EstimateTokens(string text)

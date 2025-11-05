@@ -15,6 +15,7 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly GeminiApiClient _geminiClient;
     private readonly IStageService _stageService;
     private readonly ILogger<DocumentGenerationService> _logger;
+    private readonly IConfiguration _configuration;
 
     // Mapeamento de etapas para títulos
     private static readonly Dictionary<string, string> StageTitles = new()
@@ -32,12 +33,14 @@ public class DocumentGenerationService : IDocumentGenerationService
         IdeorDbContext context,
         GeminiApiClient geminiClient,
         IStageService stageService,
-        ILogger<DocumentGenerationService> logger)
+        ILogger<DocumentGenerationService> logger,
+        IConfiguration configuration)
     {
         _context = context;
         _geminiClient = geminiClient;
         _stageService = stageService;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public async Task<ProjectTask?> GenerateDocumentAsync(
@@ -55,11 +58,22 @@ public class DocumentGenerationService : IDocumentGenerationService
             return null;
         }
 
-        // Gerar o prompt
+        // Gerar o prompt (usando versão simplificada em dev, completa em produção)
         string prompt;
         try
         {
-            prompt = PromptTemplates.GetPromptForStage(stage, inputs);
+            var useSimplified = _configuration.GetValue<bool>("PromptSettings:UseSimplifiedPrompts", false);
+
+            if (useSimplified)
+            {
+                _logger.LogInformation("Using simplified prompts (development mode)");
+                prompt = PromptResumidos.GetPromptForStage(stage, inputs);
+            }
+            else
+            {
+                _logger.LogInformation("Using full prompts (production mode)");
+                prompt = PromptTemplates.GetPromptForStage(stage, inputs);
+            }
         }
         catch (Exception ex)
         {
@@ -131,11 +145,20 @@ public class DocumentGenerationService : IDocumentGenerationService
             return null;
         }
 
-        // Gerar novo prompt com novos inputs
+        // Gerar novo prompt com novos inputs (usando versão simplificada em dev, completa em produção)
         string prompt;
         try
         {
-            prompt = PromptTemplates.GetPromptForStage(task.Phase, newInputs);
+            var useSimplified = _configuration.GetValue<bool>("PromptSettings:UseSimplifiedPrompts", false);
+
+            if (useSimplified)
+            {
+                prompt = PromptResumidos.GetPromptForStage(task.Phase, newInputs);
+            }
+            else
+            {
+                prompt = PromptTemplates.GetPromptForStage(task.Phase, newInputs);
+            }
         }
         catch (Exception ex)
         {
