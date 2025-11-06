@@ -231,9 +231,25 @@ builder.Services.AddCors(opt =>
 {
     opt.AddPolicy(FrontendCors, p =>
     {
-        p.WithOrigins("http://localhost:3000", "https://frontend-two-chi-24.vercel.app")
+        p.SetIsOriginAllowed(origin =>
+        {
+            // Permitir localhost em desenvolvimento
+            if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Permitir qualquer domínio *.vercel.app
+            if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Permitir domínio específico (se houver domínio customizado)
+            if (origin.Equals("https://frontend-two-chi-24.vercel.app", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
+        })
          .AllowAnyMethod()
          .AllowAnyHeader()
+         .AllowCredentials()
          .WithExposedHeaders("Content-Disposition", "x-request-id");
     });
 });

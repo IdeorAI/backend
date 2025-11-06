@@ -112,19 +112,26 @@ public class DocumentGenerationService : IDocumentGenerationService
         }
 
         // Criar registro de avaliação de IA
-        var evaluation = new IaEvaluation
+        try
         {
-            Id = Guid.NewGuid(),
-            TaskId = createdTask.Id,
-            InputText = prompt,
-            OutputJson = JsonDocument.Parse(generatedContent),
-            ModelUsed = "gemini-2.5-flash",
-            TokensUsed = EstimateTokens(prompt + generatedContent),
-            CreatedAt = DateTime.UtcNow
-        };
+            var evaluation = new IaEvaluation
+            {
+                Id = Guid.NewGuid(),
+                TaskId = createdTask.Id,
+                InputText = prompt,
+                OutputJson = TryParseJson(generatedContent),
+                ModelUsed = "gemini-2.5-flash",
+                TokensUsed = EstimateTokens(prompt + generatedContent),
+                CreatedAt = DateTime.UtcNow
+            };
 
-        _context.IaEvaluations.Add(evaluation);
-        await _context.SaveChangesAsync();
+            _context.IaEvaluations.Add(evaluation);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was generated successfully", createdTask.Id);
+        }
 
         _logger.LogInformation("Document generated successfully for task {TaskId}", createdTask.Id);
 
@@ -191,19 +198,26 @@ public class DocumentGenerationService : IDocumentGenerationService
         }
 
         // Criar novo registro de avaliação
-        var evaluation = new IaEvaluation
+        try
         {
-            Id = Guid.NewGuid(),
-            TaskId = taskId,
-            InputText = prompt,
-            OutputJson = JsonDocument.Parse(generatedContent),
-            ModelUsed = "gemini-2.5-flash",
-            TokensUsed = EstimateTokens(prompt + generatedContent),
-            CreatedAt = DateTime.UtcNow
-        };
+            var evaluation = new IaEvaluation
+            {
+                Id = Guid.NewGuid(),
+                TaskId = taskId,
+                InputText = prompt,
+                OutputJson = TryParseJson(generatedContent),
+                ModelUsed = "gemini-2.5-flash",
+                TokensUsed = EstimateTokens(prompt + generatedContent),
+                CreatedAt = DateTime.UtcNow
+            };
 
-        _context.IaEvaluations.Add(evaluation);
-        await _context.SaveChangesAsync();
+            _context.IaEvaluations.Add(evaluation);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was regenerated successfully", taskId);
+        }
 
         _logger.LogInformation("Document regenerated successfully for task {TaskId}", taskId);
 
@@ -262,19 +276,26 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
         }
 
         // Criar registro de avaliação
-        var evaluation = new IaEvaluation
+        try
         {
-            Id = Guid.NewGuid(),
-            TaskId = taskId,
-            InputText = refinementPrompt,
-            OutputJson = JsonDocument.Parse(refinedContent),
-            ModelUsed = "gemini-2.5-flash",
-            TokensUsed = EstimateTokens(refinementPrompt + refinedContent),
-            CreatedAt = DateTime.UtcNow
-        };
+            var evaluation = new IaEvaluation
+            {
+                Id = Guid.NewGuid(),
+                TaskId = taskId,
+                InputText = refinementPrompt,
+                OutputJson = TryParseJson(refinedContent),
+                ModelUsed = "gemini-2.5-flash",
+                TokensUsed = EstimateTokens(refinementPrompt + refinedContent),
+                CreatedAt = DateTime.UtcNow
+            };
 
-        _context.IaEvaluations.Add(evaluation);
-        await _context.SaveChangesAsync();
+            _context.IaEvaluations.Add(evaluation);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was refined successfully", taskId);
+        }
 
         _logger.LogInformation("Document refined successfully for task {TaskId}", taskId);
 
@@ -287,5 +308,23 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
     private int EstimateTokens(string text)
     {
         return text.Length / 4;
+    }
+
+    /// <summary>
+    /// Tenta fazer parse de JSON, retornando um objeto vazio em caso de falha
+    /// </summary>
+    private JsonDocument TryParseJson(string content)
+    {
+        try
+        {
+            return JsonDocument.Parse(content);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse content as JSON, wrapping in object");
+            // Criar um JSON válido com o conteúdo como string
+            var wrappedJson = JsonSerializer.Serialize(new { content = content });
+            return JsonDocument.Parse(wrappedJson);
+        }
     }
 }
