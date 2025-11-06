@@ -140,6 +140,29 @@ public class DocumentsController : ControllerBase
         return File(pdfBytes, "application/pdf", fileName);
     }
 
+    /// <summary>
+    /// Exporta um documento específico (por fase) em formato PDF
+    /// </summary>
+    [HttpGet("export/pdf/{phase}")]
+    public async Task<IActionResult> ExportSinglePhaseToPdf(
+        Guid projectId,
+        string phase,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        _logger.LogInformation("Exporting single document for project {ProjectId}, phase {Phase}", projectId, phase);
+
+        var pdfBytes = await _pdfExportService.ExportSinglePhaseDocumentAsync(projectId, userId, phase);
+
+        if (pdfBytes == null)
+        {
+            return NotFound(new { error = $"Document for phase {phase} not found or access denied" });
+        }
+
+        var fileName = $"Relatorio_{phase}_{projectId}_{DateTime.Now:yyyyMMdd}.pdf";
+
+        return File(pdfBytes, "application/pdf", fileName);
+    }
+
     private int EstimateTokens(string text)
     {
         return text.Length / 4;

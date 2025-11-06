@@ -66,6 +66,46 @@ public class PdfExportService : IPdfExportService
         }
     }
 
+    public async Task<byte[]?> ExportSinglePhaseDocumentAsync(Guid projectId, Guid userId, string phase)
+    {
+        _logger.LogInformation("Exporting single document for project {ProjectId}, phase {Phase}", projectId, phase);
+
+        // Buscar o projeto
+        var project = await _context.Projects
+            .FirstOrDefaultAsync(p => p.Id == projectId && p.OwnerId == userId);
+
+        if (project == null)
+        {
+            _logger.LogWarning("Project {ProjectId} not found for user {UserId}", projectId, userId);
+            return null;
+        }
+
+        // Buscar a task específica da fase
+        var task = await _context.Tasks
+            .Where(t => t.ProjectId == projectId && t.Phase == phase && !string.IsNullOrEmpty(t.Content))
+            .FirstOrDefaultAsync();
+
+        if (task == null)
+        {
+            _logger.LogWarning("Task for phase {Phase} not found in project {ProjectId}", phase, projectId);
+            return null;
+        }
+
+        // Gerar PDF com apenas essa task
+        try
+        {
+            var tasks = new List<Model.Entities.ProjectTask> { task };
+            var pdfBytes = GeneratePdf(project.Name, tasks);
+            _logger.LogInformation("PDF generated successfully for project {ProjectId}, phase {Phase}", projectId, phase);
+            return pdfBytes;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating PDF for project {ProjectId}, phase {Phase}", projectId, phase);
+            return null;
+        }
+    }
+
     private byte[] GeneratePdf(string projectName, List<Model.Entities.ProjectTask> tasks)
     {
         var document = Document.Create(container =>
@@ -244,4 +284,5 @@ public class PdfExportService : IPdfExportService
 public interface IPdfExportService
 {
     Task<byte[]?> ExportProjectDocumentsAsync(Guid projectId, Guid userId);
+    Task<byte[]?> ExportSinglePhaseDocumentAsync(Guid projectId, Guid userId, string phase);
 }
