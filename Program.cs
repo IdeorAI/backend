@@ -225,7 +225,7 @@ builder.Services.AddHttpClient("supabase", client =>
 // Registrar serviços instrumentados
 builder.Services.AddSingleton<InstrumentedGeminiService>();
 
-// CORS
+// CORS - Configuração ajustada para Vercel + Render
 const string FrontendCors = "FrontendCors";
 builder.Services.AddCors(opt =>
 {
@@ -233,6 +233,9 @@ builder.Services.AddCors(opt =>
     {
         p.SetIsOriginAllowed(origin =>
         {
+            if (string.IsNullOrWhiteSpace(origin))
+                return false;
+
             // Permitir localhost em desenvolvimento
             if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase))
                 return true;
@@ -250,7 +253,8 @@ builder.Services.AddCors(opt =>
          .AllowAnyMethod()
          .AllowAnyHeader()
          .AllowCredentials()
-         .WithExposedHeaders("Content-Disposition", "x-request-id");
+         .WithExposedHeaders("Content-Disposition", "x-request-id")
+         .SetPreflightMaxAge(TimeSpan.FromMinutes(10)); // Cache preflight por 10 minutos
     });
 });
 
@@ -293,11 +297,6 @@ app.Use(async (context, next) =>
 
 
 
-// Configurar endpoint Prometheus
-app.UseOpenTelemetryPrometheusScrapingEndpoint();
-
-app.UseCors(FrontendCors);
-
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -305,6 +304,20 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// IMPORTANTE: CORS deve vir ANTES de UseAuthorization e MapControllers
+app.UseCors(FrontendCors);
+
+// Configurar endpoint Prometheus
+app.UseOpenTelemetryPrometheusScrapingEndpoint();
+
 app.UseAuthorization();
 app.MapControllers();
+
+// Health check endpoint simples
+app.MapGet("/api/health", () => Results.Ok(new {
+    status = "healthy",
+    timestamp = DateTime.UtcNow,
+    environment = app.Environment.EnvironmentName
+})).WithTags("Health");
+
 app.Run();
