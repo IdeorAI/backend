@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "NteFyX9/uCE=",
+  "dgSpecHash": "38P4Lkgtbxk=",
   "success": true,
   "projectFilePath": "G:\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
   "expectedPackageFiles": [
@@ -67,6 +67,7 @@
     "C:\\Users\\aryha\\.nuget\\packages\\opentelemetry.extensions.hosting\\1.12.0\\opentelemetry.extensions.hosting.1.12.0.nupkg.sha512",
     "C:\\Users\\aryha\\.nuget\\packages\\opentelemetry.instrumentation.aspnetcore\\1.12.0\\opentelemetry.instrumentation.aspnetcore.1.12.0.nupkg.sha512",
     "C:\\Users\\aryha\\.nuget\\packages\\opentelemetry.instrumentation.http\\1.12.0\\opentelemetry.instrumentation.http.1.12.0.nupkg.sha512",
+    "C:\\Users\\aryha\\.nuget\\packages\\questpdf\\2025.7.4\\questpdf.2025.7.4.nupkg.sha512",
     "C:\\Users\\aryha\\.nuget\\packages\\sentry\\5.15.0\\sentry.5.15.0.nupkg.sha512",
     "C:\\Users\\aryha\\.nuget\\packages\\sentry.aspnetcore\\5.15.0\\sentry.aspnetcore.5.15.0.nupkg.sha512",
     "C:\\Users\\aryha\\.nuget\\packages\\sentry.extensions.logging\\5.15.0\\sentry.extensions.logging.5.15.0.nupkg.sha512",

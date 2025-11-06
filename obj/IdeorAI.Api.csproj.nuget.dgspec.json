@@ -108,6 +108,10 @@
               "target": "Package",
               "version": "[1.12.0, )"
             },
+            "QuestPDF": {
+              "target": "Package",
+              "version": "[2025.7.4, )"
+            },
             "Sentry.AspNetCore": {
               "target": "Package",
               "version": "[5.15.0, )"
