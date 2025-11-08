@@ -181,7 +181,7 @@ builder.Services.AddSingleton<BackendMetrics>();
 // GeminiApiClient via HttpClientFactory (timeout + headers default)
 builder.Services.AddHttpClient<GeminiApiClient>(client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(30); // Aumentado para 30s
+    client.Timeout = TimeSpan.FromSeconds(90); // Aumentado para 90s (prompts complexos demoram mais)
     client.DefaultRequestHeaders.Accept.Clear();
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 })
