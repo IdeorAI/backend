@@ -237,15 +237,13 @@ builder.Services.AddCors(opt =>
                 return false;
 
             // Permitir localhost em desenvolvimento
-            if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase))
+            if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
+                origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            // Permitir qualquer domínio *.vercel.app
-            if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            // Permitir domínio específico (se houver domínio customizado)
-            if (origin.Equals("https://frontend-two-chi-24.vercel.app", StringComparison.OrdinalIgnoreCase))
+            // Permitir qualquer domínio *.vercel.app (HTTPS obrigatório)
+            if (origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
                 return true;
 
             return false;
