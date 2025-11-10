@@ -40,8 +40,12 @@ var connectionString = builder.Configuration.GetConnectionString("SupabaseConnec
 
 if (string.IsNullOrWhiteSpace(connectionString))
 {
+    Log.Fatal("Database connection string is not configured. Please set 'ConnectionStrings:SupabaseConnection' in environment variables or appsettings.json");
     throw new InvalidOperationException("Database connection string is not configured. Please set 'ConnectionStrings:SupabaseConnection'.");
 }
+
+Log.Information("Database connection configured successfully. Host: {Host}",
+    connectionString.Split(';').FirstOrDefault(x => x.StartsWith("Host="))?.Replace("Host=", "") ?? "unknown");
 
 builder.Services.AddDbContext<IdeorDbContext>(options =>
 {
