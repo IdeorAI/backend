@@ -237,19 +237,31 @@ builder.Services.AddCors(opt =>
     {
         p.SetIsOriginAllowed(origin =>
         {
+            Log.Information("CORS: Verificando origin '{Origin}'", origin ?? "NULL");
+
             if (string.IsNullOrWhiteSpace(origin))
+            {
+                Log.Warning("CORS: Origin vazio ou nulo - REJEITADO");
                 return false;
+            }
 
             // Permitir localhost em desenvolvimento
             if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
                 origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Information("CORS: Origin localhost detectado - PERMITIDO");
                 return true;
+            }
 
             // Permitir qualquer domínio *.vercel.app (HTTPS obrigatório)
             if (origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
                 origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Information("CORS: Origin Vercel detectado - PERMITIDO");
                 return true;
+            }
 
+            Log.Warning("CORS: Origin '{Origin}' não corresponde a nenhuma regra - REJEITADO", origin);
             return false;
         })
          .AllowAnyMethod()
