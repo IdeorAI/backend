@@ -75,6 +75,52 @@ namespace IdeorAI.Client
             _activitySource = new ActivitySource("IdeorAI.Service");
         }
 
+        /// <summary>
+        /// Retry helper com exponential backoff para chamadas ao Gemini API
+        /// </summary>
+        private async Task<T> RetryWithExponentialBackoffAsync<T>(
+            Func<Task<T>> operation,
+            int maxRetries = 3,
+            int baseDelayMs = 2000,
+            CancellationToken ct = default)
+        {
+            int attempt = 0;
+            Exception? lastException = null;
+
+            while (attempt < maxRetries)
+            {
+                try
+                {
+                    return await operation();
+                }
+                catch (HttpRequestException ex) when (
+                    (ex.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable ||
+                     ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
+                     ex.StatusCode == System.Net.HttpStatusCode.InternalServerError) &&
+                    attempt < maxRetries - 1)
+                {
+                    attempt++;
+                    lastException = ex;
+                    int delayMs = baseDelayMs * (int)Math.Pow(2, attempt - 1); // Exponential backoff: 2s, 4s, 8s
+
+                    _logger.LogWarning(
+                        "Gemini API error {StatusCode}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
+                        ex.StatusCode, delayMs, attempt, maxRetries);
+
+                    await Task.Delay(delayMs, ct);
+                }
+                catch (Exception ex)
+                {
+                    // Outros erros (não relacionados a disponibilidade) não devem dar retry
+                    throw;
+                }
+            }
+
+            // Se chegou aqui, todas as tentativas falharam
+            _logger.LogError(lastException, "Gemini API falhou após {MaxRetries} tentativas", maxRetries);
+            throw new Exception($"Gemini API indisponível após {maxRetries} tentativas. Por favor, tente novamente em alguns instantes.", lastException);
+        }
+
         public async Task<string> GenerateContentAsync(string prompt, CancellationToken ct = default)
 
         {
@@ -85,49 +131,54 @@ namespace IdeorAI.Client
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                const string model = "gemini-2.5-flash";
-                string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
-
-                var request = new ContentRequest
+                // Wrapping a chamada com retry logic
+                return await RetryWithExponentialBackoffAsync(async () =>
                 {
-                    contents = new[]
+                    const string model = "gemini-2.5-flash";
+                    string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
+
+                    var request = new ContentRequest
                     {
-                        new Model.Content
+                        contents = new[]
                         {
-                            parts = new[]
+                            new Model.Content
                             {
-                                new Model.Part
+                                parts = new[]
                                 {
-                                    text = prompt
+                                    new Model.Part
+                                    {
+                                        text = prompt
+                                    }
                                 }
                             }
                         }
+                    };
+
+                    string jsonRequest = JsonConvert.SerializeObject(request);
+                    var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+
+                    HttpResponseMessage response = await _http.PostAsync(url, content, ct);
+
+                    // Registrar métricas
+                    _metrics.GeminiDuration.Record(stopwatch.Elapsed.TotalSeconds,
+                        new KeyValuePair<string, object?>("status", ((int)response.StatusCode).ToString()));
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        string jsonResponse = await response.Content.ReadAsStringAsync();
+                        var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
+                        return gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
                     }
-                };
+                    else
+                    {
+                        _metrics.GeminiErrors.Add(1,
+                            new KeyValuePair<string, object?>("code", response.StatusCode.ToString()));
+                        _logger.LogError("Gemini API error: {StatusCode}", response.StatusCode);
 
-                string jsonRequest = JsonConvert.SerializeObject(request);
-                var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
-
-                HttpResponseMessage response = await _http.PostAsync(url, content, ct);
-                stopwatch.Stop();
-
-                // Registrar métricas
-                _metrics.GeminiDuration.Record(stopwatch.Elapsed.TotalSeconds,
-                    new KeyValuePair<string, object?>("status", ((int)response.StatusCode).ToString()));
-
-                if (response.IsSuccessStatusCode)
-                {
-                    string jsonResponse = await response.Content.ReadAsStringAsync();
-                    var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
-                    return gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
-                }
-                else
-                {
-                    _metrics.GeminiErrors.Add(1,
-                        new KeyValuePair<string, object?>("code", response.StatusCode.ToString()));
-                    _logger.LogError("Gemini API error: {StatusCode}", response.StatusCode);
-                    throw new Exception("Error communicating with Gemini API.");
-                }
+                        // Lançar HttpRequestException com StatusCode para trigger do retry
+                        throw new HttpRequestException($"Gemini API returned {response.StatusCode}", null, response.StatusCode);
+                    }
+                }, maxRetries: 3, baseDelayMs: 2000, ct: ct);
             }
             catch (HttpRequestException ex)
             {
