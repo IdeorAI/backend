@@ -1,17 +1,17 @@
 using IdeorAI.Client;
-using IdeorAI.Data;
 using IdeorAI.Model.Entities;
-using Microsoft.EntityFrameworkCore;
+using IdeorAI.Model.SupabaseModels;
 using System.Text.Json;
 
 namespace IdeorAI.Services;
 
 /// <summary>
 /// Serviço de geração de documentos via IA (Gemini)
+/// Implementação com Supabase Client
 /// </summary>
 public class DocumentGenerationService : IDocumentGenerationService
 {
-    private readonly IdeorDbContext _context;
+    private readonly Supabase.Client _supabase;
     private readonly GeminiApiClient _geminiClient;
     private readonly IStageService _stageService;
     private readonly ILogger<DocumentGenerationService> _logger;
@@ -30,13 +30,13 @@ public class DocumentGenerationService : IDocumentGenerationService
     };
 
     public DocumentGenerationService(
-        IdeorDbContext context,
+        Supabase.Client supabase,
         GeminiApiClient geminiClient,
         IStageService stageService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration)
     {
-        _context = context;
+        _supabase = supabase;
         _geminiClient = geminiClient;
         _stageService = stageService;
         _logger = logger;
@@ -114,19 +114,20 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Criar registro de avaliação de IA
         try
         {
-            var evaluation = new IaEvaluation
+            var evaluationModel = new IaEvaluationModel
             {
-                Id = Guid.NewGuid(),
-                TaskId = createdTask.Id,
+                Id = Guid.NewGuid().ToString(),
+                TaskId = createdTask.Id.ToString(),
                 InputText = prompt,
-                OutputJson = TryParseJson(generatedContent),
-                ModelUsed = "gemini-2.5-flash",
+                OutputJson = TryParseJson(generatedContent).RootElement,
+                ModelUsed = "gemini-rotação-inteligente",
                 TokensUsed = EstimateTokens(prompt + generatedContent),
                 CreatedAt = DateTime.UtcNow
             };
 
-            _context.IaEvaluations.Add(evaluation);
-            await _context.SaveChangesAsync();
+            await _supabase
+                .From<IaEvaluationModel>()
+                .Insert(evaluationModel);
         }
         catch (Exception ex)
         {
@@ -200,19 +201,20 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Criar novo registro de avaliação
         try
         {
-            var evaluation = new IaEvaluation
+            var evaluationModel = new IaEvaluationModel
             {
-                Id = Guid.NewGuid(),
-                TaskId = taskId,
+                Id = Guid.NewGuid().ToString(),
+                TaskId = taskId.ToString(),
                 InputText = prompt,
-                OutputJson = TryParseJson(generatedContent),
-                ModelUsed = "gemini-2.5-flash",
+                OutputJson = TryParseJson(generatedContent).RootElement,
+                ModelUsed = "gemini-rotação-inteligente",
                 TokensUsed = EstimateTokens(prompt + generatedContent),
                 CreatedAt = DateTime.UtcNow
             };
 
-            _context.IaEvaluations.Add(evaluation);
-            await _context.SaveChangesAsync();
+            await _supabase
+                .From<IaEvaluationModel>()
+                .Insert(evaluationModel);
         }
         catch (Exception ex)
         {
@@ -278,19 +280,20 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
         // Criar registro de avaliação
         try
         {
-            var evaluation = new IaEvaluation
+            var evaluationModel = new IaEvaluationModel
             {
-                Id = Guid.NewGuid(),
-                TaskId = taskId,
+                Id = Guid.NewGuid().ToString(),
+                TaskId = taskId.ToString(),
                 InputText = refinementPrompt,
-                OutputJson = TryParseJson(refinedContent),
-                ModelUsed = "gemini-2.5-flash",
+                OutputJson = TryParseJson(refinedContent).RootElement,
+                ModelUsed = "gemini-rotação-inteligente",
                 TokensUsed = EstimateTokens(refinementPrompt + refinedContent),
                 CreatedAt = DateTime.UtcNow
             };
 
-            _context.IaEvaluations.Add(evaluation);
-            await _context.SaveChangesAsync();
+            await _supabase
+                .From<IaEvaluationModel>()
+                .Insert(evaluationModel);
         }
         catch (Exception ex)
         {

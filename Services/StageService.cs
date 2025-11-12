@@ -1,15 +1,16 @@
-using IdeorAI.Data;
 using IdeorAI.Model.Entities;
-using Microsoft.EntityFrameworkCore;
+using IdeorAI.Model.SupabaseModels;
+using System.Text.Json;
 
 namespace IdeorAI.Services;
 
 /// <summary>
 /// Serviço de gerenciamento de etapas (stages) dos projetos
+/// Implementação com Supabase Client
 /// </summary>
 public class StageService : IStageService
 {
-    private readonly IdeorDbContext _context;
+    private readonly Supabase.Client _supabase;
     private readonly IProjectService _projectService;
     private readonly ILogger<StageService> _logger;
 
@@ -26,11 +27,11 @@ public class StageService : IStageService
     };
 
     public StageService(
-        IdeorDbContext context,
+        Supabase.Client supabase,
         IProjectService projectService,
         ILogger<StageService> logger)
     {
-        _context = context;
+        _supabase = supabase;
         _projectService = projectService;
         _logger = logger;
     }
@@ -52,8 +53,23 @@ public class StageService : IStageService
         task.CreatedAt = DateTime.UtcNow;
         task.UpdatedAt = DateTime.UtcNow;
 
-        _context.Tasks.Add(task);
-        await _context.SaveChangesAsync();
+        var model = new TaskModel
+        {
+            Id = task.Id.ToString(),
+            ProjectId = task.ProjectId.ToString(),
+            Title = task.Title,
+            Description = task.Description,
+            Phase = task.Phase,
+            Content = task.Content,
+            Status = task.Status,
+            EvaluationResult = task.EvaluationResult?.RootElement,
+            CreatedAt = task.CreatedAt,
+            UpdatedAt = task.UpdatedAt
+        };
+
+        await _supabase
+            .From<TaskModel>()
+            .Insert(model);
 
         _logger.LogInformation("Task {TaskId} created successfully", task.Id);
 
@@ -64,25 +80,34 @@ public class StageService : IStageService
     {
         _logger.LogInformation("Getting task {TaskId} for user {UserId}", taskId, userId);
 
-        var task = await _context.Tasks
-            .Include(t => t.Project)
-            .Include(t => t.IaEvaluations)
-            .FirstOrDefaultAsync(t => t.Id == taskId);
-
-        if (task == null)
+        try
         {
-            _logger.LogWarning("Task {TaskId} not found", taskId);
+            var response = await _supabase
+                .From<TaskModel>()
+                .Select("*, project:projects(*)")
+                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, taskId.ToString())
+                .Single();
+
+            if (response == null)
+            {
+                _logger.LogWarning("Task {TaskId} not found", taskId);
+                return null;
+            }
+
+            // Validar ownership do projeto
+            if (response.Project != null && response.Project.OwnerId != userId.ToString())
+            {
+                _logger.LogWarning("User {UserId} not authorized for task {TaskId}", userId, taskId);
+                return null;
+            }
+
+            return MapTaskToEntity(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting task {TaskId}", taskId);
             return null;
         }
-
-        // Validar ownership do projeto
-        if (task.Project.OwnerId != userId)
-        {
-            _logger.LogWarning("User {UserId} not authorized for task {TaskId}", userId, taskId);
-            return null;
-        }
-
-        return task;
     }
 
     public async Task<List<ProjectTask>?> GetProjectTasksAsync(Guid projectId, Guid userId)
@@ -96,13 +121,22 @@ public class StageService : IStageService
             return null;
         }
 
-        var tasks = await _context.Tasks
-            .Where(t => t.ProjectId == projectId)
-            .OrderBy(t => t.Phase)
-            .ThenBy(t => t.CreatedAt)
-            .ToListAsync();
+        try
+        {
+            var response = await _supabase
+                .From<TaskModel>()
+                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                .Order("phase", Supabase.Postgrest.Constants.Ordering.Ascending)
+                .Order("created_at", Supabase.Postgrest.Constants.Ordering.Ascending)
+                .Get();
 
-        return tasks;
+            return response.Models.Select(MapTaskToEntity).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting tasks for project {ProjectId}", projectId);
+            return new List<ProjectTask>();
+        }
     }
 
     public async Task<ProjectTask?> UpdateTaskAsync(Guid taskId, Guid userId, Action<ProjectTask> updateAction)
@@ -118,7 +152,23 @@ public class StageService : IStageService
         updateAction(task);
         task.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync();
+        var model = new TaskModel
+        {
+            Id = task.Id.ToString(),
+            ProjectId = task.ProjectId.ToString(),
+            Title = task.Title,
+            Description = task.Description,
+            Phase = task.Phase,
+            Content = task.Content,
+            Status = task.Status,
+            EvaluationResult = task.EvaluationResult?.RootElement,
+            UpdatedAt = task.UpdatedAt
+        };
+
+        await _supabase
+            .From<TaskModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, taskId.ToString())
+            .Update(model);
 
         _logger.LogInformation("Task {TaskId} updated successfully", taskId);
 
@@ -163,11 +213,22 @@ public class StageService : IStageService
         // Se está na fase2, verificar se todas as 7 etapas estão evaluated
         if (project.CurrentPhase == "fase2")
         {
-            var evaluatedTasks = await _context.Tasks
-                .Where(t => t.ProjectId == projectId && t.Status == "evaluated")
-                .CountAsync();
+            try
+            {
+                var response = await _supabase
+                    .From<TaskModel>()
+                    .Select("id")
+                    .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                    .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "evaluated")
+                    .Get();
 
-            return evaluatedTasks >= 7; // Todas as 7 etapas completas
+                return response.Models.Count >= 7; // Todas as 7 etapas completas
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking if can advance phase for project {ProjectId}", projectId);
+                return false;
+            }
         }
 
         return false;
@@ -212,5 +273,25 @@ public class StageService : IStageService
 
         // Todas completas
         return null;
+    }
+
+    // Helper para converter TaskModel (Supabase) para ProjectTask (Entity)
+    private ProjectTask MapTaskToEntity(TaskModel model)
+    {
+        return new ProjectTask
+        {
+            Id = Guid.Parse(model.Id),
+            ProjectId = Guid.Parse(model.ProjectId),
+            Title = model.Title,
+            Description = model.Description,
+            Phase = model.Phase,
+            Content = model.Content,
+            Status = model.Status,
+            EvaluationResult = model.EvaluationResult.HasValue
+                ? JsonDocument.Parse(model.EvaluationResult.Value.GetRawText())
+                : null,
+            CreatedAt = model.CreatedAt,
+            UpdatedAt = model.UpdatedAt
+        };
     }
 }

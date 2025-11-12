@@ -1,5 +1,5 @@
-using IdeorAI.Data;
-using Microsoft.EntityFrameworkCore;
+using IdeorAI.Model.Entities;
+using IdeorAI.Model.SupabaseModels;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -9,17 +9,18 @@ namespace IdeorAI.Services;
 
 /// <summary>
 /// Serviço de exportação de documentos para PDF
+/// Implementação com Supabase Client
 /// </summary>
 public class PdfExportService : IPdfExportService
 {
-    private readonly IdeorDbContext _context;
+    private readonly Supabase.Client _supabase;
     private readonly ILogger<PdfExportService> _logger;
 
     public PdfExportService(
-        IdeorDbContext context,
+        Supabase.Client supabase,
         ILogger<PdfExportService> logger)
     {
-        _context = context;
+        _supabase = supabase;
         _logger = logger;
 
         // Configurar licença Community do QuestPDF (gratuita para uso não-comercial)
@@ -30,32 +31,41 @@ public class PdfExportService : IPdfExportService
     {
         _logger.LogInformation("Exporting documents for project {ProjectId}", projectId);
 
-        // Buscar o projeto
-        var project = await _context.Projects
-            .FirstOrDefaultAsync(p => p.Id == projectId && p.OwnerId == userId);
-
-        if (project == null)
-        {
-            _logger.LogWarning("Project {ProjectId} not found for user {UserId}", projectId, userId);
-            return null;
-        }
-
-        // Buscar todas as tasks do projeto (documentos gerados)
-        var tasks = await _context.Tasks
-            .Where(t => t.ProjectId == projectId && !string.IsNullOrEmpty(t.Content))
-            .OrderBy(t => t.Phase)
-            .ToListAsync();
-
-        if (!tasks.Any())
-        {
-            _logger.LogWarning("No documents found for project {ProjectId}", projectId);
-            return null;
-        }
-
-        // Gerar PDF
         try
         {
-            var pdfBytes = GeneratePdf(project.Name, tasks);
+            // Buscar o projeto
+            var projectResponse = await _supabase
+                .From<ProjectModel>()
+                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                .Filter("owner_id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
+                .Single();
+
+            if (projectResponse == null)
+            {
+                _logger.LogWarning("Project {ProjectId} not found for user {UserId}", projectId, userId);
+                return null;
+            }
+
+            // Buscar todas as tasks do projeto (documentos gerados)
+            var tasksResponse = await _supabase
+                .From<TaskModel>()
+                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                .Order("phase", Supabase.Postgrest.Constants.Ordering.Ascending)
+                .Get();
+
+            var tasks = tasksResponse.Models
+                .Where(t => !string.IsNullOrEmpty(t.Content))
+                .Select(MapTaskToEntity)
+                .ToList();
+
+            if (!tasks.Any())
+            {
+                _logger.LogWarning("No documents found for project {ProjectId}", projectId);
+                return null;
+            }
+
+            // Gerar PDF
+            var pdfBytes = GeneratePdf(projectResponse.Name, tasks);
             _logger.LogInformation("PDF generated successfully for project {ProjectId}", projectId);
             return pdfBytes;
         }
@@ -70,32 +80,37 @@ public class PdfExportService : IPdfExportService
     {
         _logger.LogInformation("Exporting single document for project {ProjectId}, phase {Phase}", projectId, phase);
 
-        // Buscar o projeto
-        var project = await _context.Projects
-            .FirstOrDefaultAsync(p => p.Id == projectId && p.OwnerId == userId);
-
-        if (project == null)
-        {
-            _logger.LogWarning("Project {ProjectId} not found for user {UserId}", projectId, userId);
-            return null;
-        }
-
-        // Buscar a task específica da fase
-        var task = await _context.Tasks
-            .Where(t => t.ProjectId == projectId && t.Phase == phase && !string.IsNullOrEmpty(t.Content))
-            .FirstOrDefaultAsync();
-
-        if (task == null)
-        {
-            _logger.LogWarning("Task for phase {Phase} not found in project {ProjectId}", phase, projectId);
-            return null;
-        }
-
-        // Gerar PDF com apenas essa task
         try
         {
-            var tasks = new List<Model.Entities.ProjectTask> { task };
-            var pdfBytes = GeneratePdf(project.Name, tasks);
+            // Buscar o projeto
+            var projectResponse = await _supabase
+                .From<ProjectModel>()
+                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                .Filter("owner_id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
+                .Single();
+
+            if (projectResponse == null)
+            {
+                _logger.LogWarning("Project {ProjectId} not found for user {UserId}", projectId, userId);
+                return null;
+            }
+
+            // Buscar a task específica da fase
+            var taskResponse = await _supabase
+                .From<TaskModel>()
+                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                .Filter("phase", Supabase.Postgrest.Constants.Operator.Equals, phase)
+                .Single();
+
+            if (taskResponse == null || string.IsNullOrEmpty(taskResponse.Content))
+            {
+                _logger.LogWarning("Task for phase {Phase} not found in project {ProjectId}", phase, projectId);
+                return null;
+            }
+
+            // Gerar PDF com apenas essa task
+            var tasks = new List<ProjectTask> { MapTaskToEntity(taskResponse) };
+            var pdfBytes = GeneratePdf(projectResponse.Name, tasks);
             _logger.LogInformation("PDF generated successfully for project {ProjectId}, phase {Phase}", projectId, phase);
             return pdfBytes;
         }
@@ -106,7 +121,27 @@ public class PdfExportService : IPdfExportService
         }
     }
 
-    private byte[] GeneratePdf(string projectName, List<Model.Entities.ProjectTask> tasks)
+    // Helper para converter TaskModel (Supabase) para ProjectTask (Entity)
+    private ProjectTask MapTaskToEntity(TaskModel model)
+    {
+        return new ProjectTask
+        {
+            Id = Guid.Parse(model.Id),
+            ProjectId = Guid.Parse(model.ProjectId),
+            Title = model.Title,
+            Description = model.Description,
+            Phase = model.Phase,
+            Content = model.Content,
+            Status = model.Status,
+            EvaluationResult = model.EvaluationResult.HasValue
+                ? JsonDocument.Parse(model.EvaluationResult.Value.GetRawText())
+                : null,
+            CreatedAt = model.CreatedAt,
+            UpdatedAt = model.UpdatedAt
+        };
+    }
+
+    private byte[] GeneratePdf(string projectName, List<ProjectTask> tasks)
     {
         var document = Document.Create(container =>
         {

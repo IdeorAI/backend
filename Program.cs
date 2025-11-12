@@ -1,9 +1,7 @@
 using IdeorAI.Client;
-using IdeorAI.Data;
 using IdeorAI.Services;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Formatting.Compact;
 using OpenTelemetry;
@@ -35,35 +33,25 @@ builder.Host.UseSerilog();
 // Add services to the container.
 builder.Services.AddControllers();
 
-// ========== EF CORE + SUPABASE POSTGRESQL ==========
-var connectionString = builder.Configuration.GetConnectionString("SupabaseConnection");
+// ========== SUPABASE CLIENT ==========
+var supabaseUrl = builder.Configuration["Supabase:Url"];
+var supabaseServiceKey = builder.Configuration["Supabase:ServiceRoleKey"];
 
-if (string.IsNullOrWhiteSpace(connectionString))
+if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(supabaseServiceKey))
 {
-    Log.Fatal("Database connection string is not configured. Please set 'ConnectionStrings:SupabaseConnection' in environment variables or appsettings.json");
-    throw new InvalidOperationException("Database connection string is not configured. Please set 'ConnectionStrings:SupabaseConnection'.");
+    Log.Fatal("Supabase configuration is missing. Please set 'Supabase:Url' and 'Supabase:ServiceRoleKey' in environment variables or appsettings.json");
+    throw new InvalidOperationException("Supabase config missing. Set 'Supabase:Url' and 'Supabase:ServiceRoleKey'.");
 }
 
-Log.Information("Database connection configured successfully. Host: {Host}",
-    connectionString.Split(';').FirstOrDefault(x => x.StartsWith("Host="))?.Replace("Host=", "") ?? "unknown");
+Log.Information("Supabase Client configured successfully. URL: {Url}", supabaseUrl);
 
-builder.Services.AddDbContext<IdeorDbContext>(options =>
+var supabaseOptions = new Supabase.SupabaseOptions
 {
-    options.UseNpgsql(connectionString, npgsqlOptions =>
-    {
-        npgsqlOptions.EnableRetryOnFailure(
-            maxRetryCount: 3,
-            maxRetryDelay: TimeSpan.FromSeconds(5),
-            errorCodesToAdd: null);
-    });
+    AutoConnectRealtime = false // Não precisamos de realtime para operações REST
+};
 
-    // Logging de queries SQL em desenvolvimento
-    if (builder.Environment.IsDevelopment())
-    {
-        options.EnableSensitiveDataLogging();
-        options.EnableDetailedErrors();
-    }
-});
+builder.Services.AddSingleton(provider =>
+    new Supabase.Client(supabaseUrl, supabaseServiceKey, supabaseOptions));
 
 // Registrar serviços de negócio
 builder.Services.AddScoped<IProjectService, ProjectService>();
@@ -168,16 +156,6 @@ if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException("Gemini API key is not configured. Please set the 'Gemini:ApiKey' configuration value.");
 }
 
-//validaçao da Api Key do supabase
-var supabaseUrl = builder.Configuration["Supabase:Url"];
-var supabaseServiceKey = builder.Configuration["Supabase:ServiceRoleKey"];
-
-if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(supabaseServiceKey))
-{
-    throw new InvalidOperationException("Supabase config missing. Set 'Supabase:Url' and 'Supabase:ServiceRoleKey'.");
-}
-
-
 // Registrar métricas personalizadas
 builder.Services.AddSingleton<BackendMetrics>();
 
@@ -212,16 +190,18 @@ builder.Services.AddHttpClient<GeminiApiClient>(client =>
     return handler;
 });
 
+// HttpClient adicional para PostgREST direto (se necessário)
 builder.Services.AddHttpClient("supabase", client =>
 {
-    client.BaseAddress = new Uri($"{supabaseUrl!.TrimEnd('/')}/rest/v1/");
+    var url = builder.Configuration["Supabase:Url"];
+    var key = builder.Configuration["Supabase:ServiceRoleKey"];
+
+    client.BaseAddress = new Uri($"{url!.TrimEnd('/')}/rest/v1/");
     client.Timeout = TimeSpan.FromSeconds(10);
     client.DefaultRequestHeaders.Accept.Clear();
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-    // Autenticação do PostgREST
-    client.DefaultRequestHeaders.Add("apikey", supabaseServiceKey);
-    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", supabaseServiceKey);
-    // Para retornar a linha atualizada (útil para logs/validação)
+    client.DefaultRequestHeaders.Add("apikey", key);
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
     client.DefaultRequestHeaders.Add("Prefer", "return=representation");
 });
 
