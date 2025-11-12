@@ -54,7 +54,7 @@ public class DocumentsController : ControllerBase
             TaskId = task.Id,
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
-            ModelUsed = "gemini-2.5-flash",
+            ModelUsed = "rotação-inteligente",  // Rotaciona entre gemini-2.0-flash-exp, gemini-2.5-flash, gemini-flash-1.5
             TokensUsed = EstimateTokens(task.Content ?? ""),
             Status = task.Status
         });
@@ -83,7 +83,7 @@ public class DocumentsController : ControllerBase
             TaskId = task.Id,
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
-            ModelUsed = "gemini-2.5-flash",
+            ModelUsed = "rotação-inteligente",  // Rotaciona entre gemini-2.0-flash-exp, gemini-2.5-flash, gemini-flash-1.5
             TokensUsed = EstimateTokens(task.Content ?? ""),
             Status = task.Status
         });
@@ -112,7 +112,7 @@ public class DocumentsController : ControllerBase
             TaskId = task.Id,
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
-            ModelUsed = "gemini-2.5-flash",
+            ModelUsed = "rotação-inteligente",  // Rotaciona entre gemini-2.0-flash-exp, gemini-2.5-flash, gemini-flash-1.5
             TokensUsed = EstimateTokens(task.Content ?? ""),
             Status = task.Status
         });

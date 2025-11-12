@@ -81,11 +81,11 @@ public class DocumentGenerationService : IDocumentGenerationService
             return null;
         }
 
-        // Chamar Gemini API
+        // Chamar Gemini API (com rotação inteligente de modelos baseada na etapa)
         string generatedContent;
         try
         {
-            generatedContent = await _geminiClient.GenerateContentAsync(prompt);
+            generatedContent = await _geminiClient.GenerateContentAsync(prompt, stage);
         }
         catch (Exception ex)
         {

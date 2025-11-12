@@ -76,6 +76,50 @@ namespace IdeorAI.Client
         }
 
         /// <summary>
+        /// Seleciona modelo Gemini baseado em rotação para evitar rate limiting.
+        /// Estratégia: Rotaciona entre 3 modelos para distribuir requisições
+        /// - gemini-2.0-flash-exp: Modelo principal (etapas complexas: 1, 3, 5, 7)
+        /// - gemini-2.5-flash: Modelo secundário (etapas intermediárias: 2, 4, 6)
+        /// - gemini-flash-1.5: Modelo leve (requisições menores: geração de ideias, debug)
+        /// </summary>
+        private string GetModelForStage(string? stage = null)
+        {
+            // Se não tem stage, rotaciona por timestamp (requisições genéricas)
+            if (string.IsNullOrEmpty(stage))
+            {
+                var hash = DateTime.UtcNow.Ticks % 3;
+                return hash switch
+                {
+                    0 => "gemini-2.0-flash-exp",
+                    1 => "gemini-2.5-flash",
+                    _ => "gemini-flash-1.5"
+                };
+            }
+
+            // Rotação inteligente baseada na etapa (evita sobrecarga de um único modelo)
+            return stage.ToLower() switch
+            {
+                // Etapas complexas (prompts longos) → gemini-2.0-flash-exp
+                "etapa1" => "gemini-2.0-flash-exp",  // Problema e Oportunidade
+                "etapa3" => "gemini-2.0-flash-exp",  // Proposta de Valor
+                "etapa5" => "gemini-2.0-flash-exp",  // MVP
+                "etapa7" => "gemini-2.0-flash-exp",  // Pitch Deck + Plano Executivo
+
+                // Etapas intermediárias → gemini-2.5-flash
+                "etapa2" => "gemini-2.5-flash",      // Pesquisa de Mercado
+                "etapa4" => "gemini-2.5-flash",      // Modelo de Negócio
+                "etapa6" => "gemini-2.5-flash",      // Equipe Mínima
+
+                // Geração de ideias (prompt menor) → gemini-flash-1.5 (modelo leve)
+                "ideas" => "gemini-flash-1.5",
+                "debug" => "gemini-flash-1.5",
+
+                // Fallback para etapas não mapeadas
+                _ => "gemini-2.5-flash"
+            };
+        }
+
+        /// <summary>
         /// Retry helper com exponential backoff para chamadas ao Gemini API
         /// </summary>
         private async Task<T> RetryWithExponentialBackoffAsync<T>(
@@ -121,8 +165,13 @@ namespace IdeorAI.Client
             throw new Exception($"Gemini API indisponível após {maxRetries} tentativas. Por favor, tente novamente em alguns instantes.", lastException);
         }
 
-        public async Task<string> GenerateContentAsync(string prompt, CancellationToken ct = default)
-
+        /// <summary>
+        /// Gera conteúdo usando o Gemini API com rotação inteligente de modelos
+        /// </summary>
+        /// <param name="prompt">Prompt para geração</param>
+        /// <param name="stage">Etapa do projeto (para rotação inteligente de modelos)</param>
+        /// <param name="ct">Cancellation token</param>
+        public async Task<string> GenerateContentAsync(string prompt, string? stage = null, CancellationToken ct = default)
         {
             using var activity = _activitySource.StartActivity("Gemini.GenerateContent");
             // Removido o using problemático do RequestsInFlight
@@ -134,7 +183,9 @@ namespace IdeorAI.Client
                 // Wrapping a chamada com retry logic
                 return await RetryWithExponentialBackoffAsync(async () =>
                 {
-                    const string model = "gemini-2.5-flash";
+                    // Seleciona modelo baseado na etapa (rotação inteligente para evitar rate limit)
+                    string model = GetModelForStage(stage);
+                    _logger.LogInformation("Using model {Model} for stage {Stage}", model, stage ?? "generic");
                     string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
 
                     var request = new ContentRequest
