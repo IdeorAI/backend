@@ -69,26 +69,63 @@ public class DocumentGenerationService : IDocumentGenerationService
             _logger.LogInformation("[DocumentGeneration] Input [{Key}]: {Value}", kvp.Key, valuePreview);
         }
 
-        // Gerar o prompt (usando versão simplificada em dev, completa em produção)
+        // Gerar o prompt (3 níveis: full, resumido, mini)
         string prompt;
+        string promptMode;
         try
         {
-            var useSimplified = _configuration.GetValue<bool>("PromptSettings:UseSimplifiedPrompts", false);
+            // Prioridade: 1) Variável de ambiente, 2) appsettings.json, 3) default = "mini"
+            promptMode = Environment.GetEnvironmentVariable("PromptSettings__PromptMode")
+                ?? _configuration.GetValue<string>("PromptSettings:PromptMode")
+                ?? "mini";
 
-            _logger.LogInformation("[DocumentGeneration] UseSimplifiedPrompts configurado: {UseSimplified}", useSimplified);
+            promptMode = promptMode.ToLower();
 
-            if (useSimplified)
+            _logger.LogInformation("[DocumentGeneration] PromptMode configurado: {PromptMode}", promptMode);
+
+            switch (promptMode)
             {
-                _logger.LogInformation("[DocumentGeneration] Usando prompts resumidos (desenvolvimento)");
-                prompt = PromptResumidos.GetPromptForStage(stage, inputs);
-            }
-            else
-            {
-                _logger.LogInformation("[DocumentGeneration] Usando prompts completos (produção)");
-                prompt = PromptTemplates.GetPromptForStage(stage, inputs);
+                case "full":
+                case "completo":
+                    _logger.LogInformation("[DocumentGeneration] Usando prompts COMPLETOS (full)");
+                    prompt = PromptTemplates.GetPromptForStage(stage, inputs);
+                    break;
+
+                case "resumido":
+                case "resumed":
+                    _logger.LogInformation("[DocumentGeneration] Usando prompts RESUMIDOS (resumed)");
+                    prompt = PromptResumidos.GetPromptForStage(stage, inputs);
+                    break;
+
+                case "mini":
+                case "minimal":
+                default:
+                    _logger.LogInformation("[DocumentGeneration] Usando prompts MINI (ultra-compactos)");
+                    prompt = PromptMiniResumidos.GetPromptForStage(stage, inputs);
+                    break;
             }
 
-            _logger.LogInformation("[DocumentGeneration] Prompt gerado com sucesso. Comprimento: {Length} caracteres", prompt.Length);
+            _logger.LogInformation("[DocumentGeneration] Prompt gerado com sucesso. Modo: {Mode}, Comprimento: {Length} caracteres",
+                promptMode, prompt.Length);
+
+            // Log comparativo de tamanhos (apenas no primeiro uso para referência)
+            try
+            {
+                var fullSize = PromptTemplates.GetPromptForStage(stage, inputs).Length;
+                var resumidoSize = PromptResumidos.GetPromptForStage(stage, inputs).Length;
+                var miniSize = PromptMiniResumidos.GetPromptForStage(stage, inputs).Length;
+
+                var percentResumido = (resumidoSize * 100.0 / fullSize);
+                var percentMini = (miniSize * 100.0 / fullSize);
+
+                _logger.LogInformation(
+                    "[DocumentGeneration] 📊 Comparação de tamanhos para {Stage}: Full={FullSize} chars | Resumido={ResumidoSize} ({PercentR:F1}%) | Mini={MiniSize} ({PercentM:F1}%) | Usando={Using}",
+                    stage, fullSize, resumidoSize, percentResumido, miniSize, percentMini, promptMode);
+            }
+            catch (Exception compEx)
+            {
+                _logger.LogWarning(compEx, "[DocumentGeneration] Falha ao comparar tamanhos de prompt (não crítico)");
+            }
         }
         catch (Exception ex)
         {
