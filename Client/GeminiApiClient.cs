@@ -125,7 +125,7 @@ namespace IdeorAI.Client
         private async Task<T> RetryWithExponentialBackoffAsync<T>(
             Func<Task<T>> operation,
             int maxRetries = 3,
-            int baseDelayMs = 2000,
+            int baseDelayMs = 3000, // AUMENTADO: 3s → 6s → 12s (antes: 2s → 4s → 8s)
             CancellationToken ct = default)
         {
             int attempt = 0;
@@ -145,10 +145,10 @@ namespace IdeorAI.Client
                 {
                     attempt++;
                     lastException = ex;
-                    int delayMs = baseDelayMs * (int)Math.Pow(2, attempt - 1); // Exponential backoff: 2s, 4s, 8s
+                    int delayMs = baseDelayMs * (int)Math.Pow(2, attempt - 1); // Exponential backoff: 3s, 6s, 12s
 
                     _logger.LogWarning(
-                        "Gemini API error {StatusCode}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
+                        "[GeminiRetry] API error {StatusCode}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
                         ex.StatusCode, delayMs, attempt, maxRetries);
 
                     await Task.Delay(delayMs, ct);
@@ -161,7 +161,7 @@ namespace IdeorAI.Client
             }
 
             // Se chegou aqui, todas as tentativas falharam
-            _logger.LogError(lastException, "Gemini API falhou após {MaxRetries} tentativas", maxRetries);
+            _logger.LogError(lastException, "[GeminiRetry] API falhou após {MaxRetries} tentativas", maxRetries);
             throw new Exception($"Gemini API indisponível após {maxRetries} tentativas. Por favor, tente novamente em alguns instantes.", lastException);
         }
 
@@ -178,6 +178,8 @@ namespace IdeorAI.Client
             _metrics.RequestsInFlight.Add(1);
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            bool usedFallback = false;
+
             try
             {
                 // Wrapping a chamada com retry logic
@@ -185,7 +187,7 @@ namespace IdeorAI.Client
                 {
                     // Seleciona modelo baseado na etapa (rotação inteligente para evitar rate limit)
                     string model = GetModelForStage(stage);
-                    _logger.LogInformation("Using model {Model} for stage {Stage}", model, stage ?? "generic");
+                    _logger.LogInformation("[GeminiAPI] Using model {Model} for stage {Stage}", model, stage ?? "generic");
                     string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
 
                     var request = new ContentRequest
@@ -218,18 +220,75 @@ namespace IdeorAI.Client
                     {
                         string jsonResponse = await response.Content.ReadAsStringAsync();
                         var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
+                        _logger.LogInformation("[GeminiAPI] ✅ Sucesso com modelo {Model}", model);
                         return gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
                     }
                     else
                     {
                         _metrics.GeminiErrors.Add(1,
                             new KeyValuePair<string, object?>("code", response.StatusCode.ToString()));
-                        _logger.LogError("Gemini API error: {StatusCode}", response.StatusCode);
+                        _logger.LogError("[GeminiAPI] Gemini API error: {StatusCode} com modelo {Model}", response.StatusCode, model);
 
                         // Lançar HttpRequestException com StatusCode para trigger do retry
                         throw new HttpRequestException($"Gemini API returned {response.StatusCode}", null, response.StatusCode);
                     }
-                }, maxRetries: 3, baseDelayMs: 2000, ct: ct);
+                }, maxRetries: 3, baseDelayMs: 3000, ct: ct); // AUMENTADO: baseDelay 3s
+            }
+            catch (Exception ex) when (!usedFallback && stage != null && stage != "debug")
+            {
+                // FALLBACK: Se rotação falhou, tentar novamente com modelo fixo gemini-2.5-flash
+                _logger.LogWarning("[GeminiAPI] Rotação de modelos falhou para stage {Stage}. Tentando fallback com gemini-2.5-flash...", stage);
+                usedFallback = true;
+
+                try
+                {
+                    return await RetryWithExponentialBackoffAsync(async () =>
+                    {
+                        string fallbackModel = "gemini-2.5-flash";
+                        _logger.LogInformation("[GeminiAPI] [FALLBACK] Using fixed model {Model}", fallbackModel);
+                        string url = $"https://generativelanguage.googleapis.com/v1beta/models/{fallbackModel}:generateContent?key={_apiKey}";
+
+                        var request = new ContentRequest
+                        {
+                            contents = new[]
+                            {
+                                new Model.Content
+                                {
+                                    parts = new[]
+                                    {
+                                        new Model.Part
+                                        {
+                                            text = prompt
+                                        }
+                                    }
+                                }
+                            }
+                        };
+
+                        string jsonRequest = JsonConvert.SerializeObject(request);
+                        var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+
+                        HttpResponseMessage response = await _http.PostAsync(url, content, ct);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            string jsonResponse = await response.Content.ReadAsStringAsync();
+                            var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
+                            _logger.LogInformation("[GeminiAPI] ✅ Sucesso com fallback model {Model}", fallbackModel);
+                            return gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
+                        }
+                        else
+                        {
+                            _logger.LogError("[GeminiAPI] [FALLBACK] Falhou com {StatusCode}", response.StatusCode);
+                            throw new HttpRequestException($"Gemini API returned {response.StatusCode}", null, response.StatusCode);
+                        }
+                    }, maxRetries: 3, baseDelayMs: 3000, ct: ct);
+                }
+                catch (Exception fallbackEx)
+                {
+                    _logger.LogError(fallbackEx, "[GeminiAPI] [FALLBACK] Falha mesmo com modelo fixo");
+                    throw; // Re-throw da exceção original
+                }
             }
             catch (HttpRequestException ex)
             {

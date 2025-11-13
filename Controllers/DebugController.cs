@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Net.Http;
 using Serilog;
+using IdeorAI.Client;
 
 namespace IdeorAI.Controllers;
 
@@ -10,11 +11,16 @@ public class DebugController : ControllerBase
 {
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly GeminiApiClient _geminiClient;
 
-    public DebugController(IConfiguration configuration, IHttpClientFactory httpClientFactory)
+    public DebugController(
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        GeminiApiClient geminiClient)
     {
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
+        _geminiClient = geminiClient;
     }
 
     /// <summary>
@@ -173,6 +179,95 @@ public class DebugController : ControllerBase
                 "Teste manualmente: https://aistudio.google.com/apikey"
             }
         };
+    }
+
+    /// <summary>
+    /// Testa geração de documento com prompt simples (isolado do DocumentGenerationService)
+    /// POST /api/debug/test-document-generation
+    /// </summary>
+    [HttpPost("test-document-generation")]
+    public async Task<IActionResult> TestDocumentGeneration()
+    {
+        try
+        {
+            Log.Information("[DEBUG] Iniciando teste de geração de documento");
+
+            var apiKey = _configuration["Gemini:ApiKey"] ?? Environment.GetEnvironmentVariable("Gemini__ApiKey");
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                return Ok(new
+                {
+                    success = false,
+                    error = "API Key do Gemini não configurada",
+                    stage = "config-check"
+                });
+            }
+
+            Log.Information("[DEBUG] API Key presente. Comprimento: {Length}", apiKey.Length);
+
+            // Prompt simples para teste (similar ao usado em /idea/descreva)
+            var testPrompt = @"Gere 3 ideias inovadoras de startup para o segmento de saúde no Brasil.
+
+Retorne APENAS um JSON no formato:
+{
+  ""ideas"": [
+    ""Ideia 1"",
+    ""Ideia 2"",
+    ""Ideia 3""
+  ]
+}";
+
+            Log.Information("[DEBUG] Prompt de teste criado. Comprimento: {Length} chars", testPrompt.Length);
+            Log.Information("[DEBUG] Chamando Gemini API com modelo fixo: gemini-2.5-flash");
+
+            var startTime = DateTime.UtcNow;
+
+            // Chamar diretamente o GeminiApiClient com modelo fixo (não usa rotação)
+            var generatedContent = await _geminiClient.GenerateContentAsync(testPrompt, stage: "debug");
+
+            var elapsed = DateTime.UtcNow - startTime;
+
+            Log.Information("[DEBUG] Gemini API respondeu com sucesso. Tempo: {Elapsed}ms", elapsed.TotalMilliseconds);
+            Log.Information("[DEBUG] Conteúdo gerado. Comprimento: {Length} chars", generatedContent.Length);
+
+            return Ok(new
+            {
+                success = true,
+                message = "✅ Geração de documento funcionando!",
+                promptLength = testPrompt.Length,
+                responseLength = generatedContent.Length,
+                elapsedMs = elapsed.TotalMilliseconds,
+                model = "gemini-flash-1.5", // Modelo usado para debug (configurado em GeminiApiClient.GetModelForStage)
+                generatedContent = generatedContent.Length > 500 ? generatedContent.Substring(0, 500) + "..." : generatedContent
+            });
+        }
+        catch (HttpRequestException httpEx)
+        {
+            Log.Error(httpEx, "[DEBUG] Erro HTTP ao chamar Gemini API");
+            return Ok(new
+            {
+                success = false,
+                error = "Erro HTTP ao chamar Gemini API",
+                exceptionType = httpEx.GetType().Name,
+                message = httpEx.Message,
+                statusCode = httpEx.StatusCode?.ToString() ?? "Unknown",
+                stage = "gemini-api-call"
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "[DEBUG] Erro geral ao testar geração de documento");
+            return Ok(new
+            {
+                success = false,
+                error = "Erro ao testar geração de documento",
+                exceptionType = ex.GetType().Name,
+                message = ex.Message,
+                stackTrace = ex.StackTrace,
+                stage = "general-error"
+            });
+        }
     }
 
     private static string ExtractHost(string? connectionString)

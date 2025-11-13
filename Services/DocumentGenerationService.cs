@@ -49,13 +49,24 @@ public class DocumentGenerationService : IDocumentGenerationService
         string stage,
         Dictionary<string, string> inputs)
     {
-        _logger.LogInformation("Generating document for project {ProjectId}, stage {Stage}", projectId, stage);
+        _logger.LogInformation("[DocumentGeneration] Iniciando geração para project {ProjectId}, stage {Stage}, userId {UserId}",
+            projectId, stage, userId);
 
         // Validar stage
         if (!StageTitles.ContainsKey(stage))
         {
-            _logger.LogWarning("Invalid stage: {Stage}", stage);
+            _logger.LogWarning("[DocumentGeneration] Stage inválido: {Stage}", stage);
             return null;
+        }
+
+        _logger.LogInformation("[DocumentGeneration] Stage válido. Título: {Title}", StageTitles[stage]);
+
+        // Log dos inputs recebidos
+        _logger.LogInformation("[DocumentGeneration] Inputs recebidos: {InputCount} campos", inputs.Count);
+        foreach (var kvp in inputs)
+        {
+            var valuePreview = kvp.Value.Length > 100 ? kvp.Value.Substring(0, 100) + "..." : kvp.Value;
+            _logger.LogInformation("[DocumentGeneration] Input [{Key}]: {Value}", kvp.Key, valuePreview);
         }
 
         // Gerar o prompt (usando versão simplificada em dev, completa em produção)
@@ -64,20 +75,24 @@ public class DocumentGenerationService : IDocumentGenerationService
         {
             var useSimplified = _configuration.GetValue<bool>("PromptSettings:UseSimplifiedPrompts", false);
 
+            _logger.LogInformation("[DocumentGeneration] UseSimplifiedPrompts configurado: {UseSimplified}", useSimplified);
+
             if (useSimplified)
             {
-                _logger.LogInformation("Using simplified prompts (development mode)");
+                _logger.LogInformation("[DocumentGeneration] Usando prompts resumidos (desenvolvimento)");
                 prompt = PromptResumidos.GetPromptForStage(stage, inputs);
             }
             else
             {
-                _logger.LogInformation("Using full prompts (production mode)");
+                _logger.LogInformation("[DocumentGeneration] Usando prompts completos (produção)");
                 prompt = PromptTemplates.GetPromptForStage(stage, inputs);
             }
+
+            _logger.LogInformation("[DocumentGeneration] Prompt gerado com sucesso. Comprimento: {Length} caracteres", prompt.Length);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating prompt for stage {Stage}", stage);
+            _logger.LogError(ex, "[DocumentGeneration] Erro ao gerar prompt para stage {Stage}", stage);
             return null;
         }
 
@@ -85,15 +100,25 @@ public class DocumentGenerationService : IDocumentGenerationService
         string generatedContent;
         try
         {
+            _logger.LogInformation("[DocumentGeneration] Chamando Gemini API para stage {Stage}...", stage);
+            var startTime = DateTime.UtcNow;
+
             generatedContent = await _geminiClient.GenerateContentAsync(prompt, stage);
+
+            var elapsed = DateTime.UtcNow - startTime;
+            _logger.LogInformation("[DocumentGeneration] Gemini API respondeu com sucesso. Tempo: {ElapsedMs}ms, Conteúdo: {Length} caracteres",
+                elapsed.TotalMilliseconds, generatedContent.Length);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calling Gemini API for stage {Stage}", stage);
+            _logger.LogError(ex, "[DocumentGeneration] Erro ao chamar Gemini API para stage {Stage}. Tipo: {ExceptionType}, Mensagem: {Message}",
+                stage, ex.GetType().Name, ex.Message);
             return null;
         }
 
         // Criar a task com o conteúdo gerado
+        _logger.LogInformation("[DocumentGeneration] Criando task no banco de dados...");
+
         var task = new ProjectTask
         {
             Title = StageTitles[stage],
@@ -107,13 +132,17 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         if (createdTask == null)
         {
-            _logger.LogWarning("Failed to create task for project {ProjectId}", projectId);
+            _logger.LogWarning("[DocumentGeneration] Falha ao criar task para project {ProjectId}", projectId);
             return null;
         }
+
+        _logger.LogInformation("[DocumentGeneration] Task criada com sucesso. TaskId: {TaskId}", createdTask.Id);
 
         // Criar registro de avaliação de IA
         try
         {
+            _logger.LogInformation("[DocumentGeneration] Salvando registro de avaliação IA...");
+
             var evaluationModel = new IaEvaluationModel
             {
                 Id = Guid.NewGuid().ToString(),
@@ -128,13 +157,15 @@ public class DocumentGenerationService : IDocumentGenerationService
             await _supabase
                 .From<IaEvaluationModel>()
                 .Insert(evaluationModel);
+
+            _logger.LogInformation("[DocumentGeneration] Registro de avaliação salvo com sucesso");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was generated successfully", createdTask.Id);
+            _logger.LogWarning(ex, "[DocumentGeneration] Falha ao salvar avaliação para task {TaskId}, mas documento foi gerado com sucesso", createdTask.Id);
         }
 
-        _logger.LogInformation("Document generated successfully for task {TaskId}", createdTask.Id);
+        _logger.LogInformation("[DocumentGeneration] ✅ Documento gerado com sucesso! TaskId: {TaskId}, Stage: {Stage}", createdTask.Id, stage);
 
         return createdTask;
     }
