@@ -205,6 +205,13 @@ builder.Services.AddHttpClient("supabase", client =>
     client.DefaultRequestHeaders.Add("Prefer", "return=representation");
 });
 
+// HttpClient para HubSpot API
+builder.Services.AddHttpClient<HubSpotService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Accept.Clear();
+    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+});
 
 // Registrar serviços instrumentados
 builder.Services.AddSingleton<InstrumentedGeminiService>();
