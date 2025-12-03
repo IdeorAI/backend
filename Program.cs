@@ -1,5 +1,6 @@
 using IdeorAI.Client;
 using IdeorAI.Services;
+using IdeorAI.Api.Services;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Serilog;
