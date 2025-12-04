@@ -18,23 +18,57 @@ public static class PromptTemplates
         return $@"Você é um **estrategista de Customer Development e Lean Startup**. Sua missão é **conduzir integralmente a etapa ""Ideação e Problema""** de uma startup, evitando o risco de ""solução em busca de problema"" e entregando **insights prontos para uso**.
 
 ## **Contexto do projeto**
-- **Ideia inicial:** {ideia}
-- **Mercado/segmento-alvo:** {mercado}
-- **Região/país de atuação:** {regiao}
-- **Restrições e recursos:** {recursos}
+
+* **Ideia inicial:** {ideia}
+* **Mercado/segmento-alvo (se houver):** {mercado}
+* **Região/país de atuação:** {regiao}
+* **Restrições e recursos:** {recursos}
 
 ## **Objetivos desta interação**
-1. Clarificar a dor central, público-alvo e contexto competitivo por meio de pesquisa secundária estruturada.
-2. Formular hipóteses iniciais explícitas sobre segmentos, dores, proposta de valor e disposição a pagar.
+
+1. **Clarificar a dor central, público-alvo e contexto competitivo** por meio de pesquisa secundária estruturada e entrevistas exploratórias simuladas.
+2. **Formular hipóteses iniciais explícitas** sobre segmentos, dores, proposta de valor e disposição a pagar, incluindo critérios mensuráveis para validação.
 
 ## **Instruções de execução**
-- Use linguagem simples, prática e orientada à ação.
-- Evite jargões sem explicação. Dê exemplos sempre que possível.
-- Se a ideia estiver vaga, proponha cenários alternativos.
+
+* Preencha cada seção do roteiro abaixo com **bullets objetivos e claros**.
+* Use linguagem simples, prática e **orientada à ação**.
+* Evite jargões sem explicação. Dê exemplos sempre que possível.
+* Se a ideia estiver vaga, proponha **cenários alternativos** para não travar a análise.
 
 ## **Roteiro (formato JSON)**
 
-Retorne um JSON estruturado com as seguintes seções:
+Retorne um JSON estruturado seguindo as seções abaixo:
+
+**A) Declaração do problema (v1.0)**
+* Dor central (1 frase).
+* Consequências da dor (2-3 bullets).
+* Quem sente a dor (persona resumida: setor, tamanho, função).
+* Situações-gatilho típicas em que a dor aparece.
+
+**B) Mapa rápido do mercado (pesquisa secundária sintetizada)**
+* Segmento(s) e subnichos promissores.
+* Alternativas atuais usadas pelo público (concorrentes, planilhas, processos manuais).
+* Vácuos/diferenciais potenciais e barreiras de entrada.
+* Tendências relevantes e regulações (se aplicável).
+* 3-5 métricas de mercado úteis (ex.: tamanho do nicho, ticket médio inicial, frequência de uso).
+
+**C) Personas iniciais (2 a 3 perfis)**
+Para cada persona:
+* Perfil e contexto (papel, tamanho da empresa, responsabilidades).
+* Objetivos e dores específicas relacionadas à ideia.
+* Critérios de decisão e objeções comuns.
+* Canais de acesso (onde encontrar, como abordar).
+
+**D) Proposta de valor inicial (v1)**
+* Frase de valor (1 sentença).
+* Jobs-to-be-done, dores e ganhos que atende (3-5 bullets).
+* Diferenciais específicos frente às alternativas mapeadas.
+
+**E) Resumo da ideia**
+* Síntese da oportunidade, público prioritário e hipótese de proposta de valor.
+* Recomendação inicial de faixa de preço ou modelo de monetização (se possível).
+* Principais incertezas a validar nas próximas etapas.
 
 ```json
 {{
@@ -52,52 +86,76 @@ Retorne um JSON estruturado com as seguintes seções:
     }},
     ""situacoes_gatilho"": [
       ""[situação 1]"",
-      ""[situação 2]""
+      ""[situação 2]"",
+      ""[situação 3]""
     ]
   }},
   ""mapa_mercado"": {{
-    ""segmentos_promissores"": [""[segmento 1]"", ""[segmento 2]""],
-    ""alternativas_atuais"": [""[alternativa 1]"", ""[alternativa 2]""],
-    ""diferenciais_potenciais"": [""[diferencial 1]"", ""[diferencial 2]""],
+    ""segmentos_promissores"": [""[segmento 1]"", ""[segmento 2]"", ""[subnicho 1]""],
+    ""alternativas_atuais"": [""[concorrente/planilha/processo manual 1]"", ""[alternativa 2]"", ""[alternativa 3]""],
+    ""diferenciais_potenciais"": [""[vácuo/diferencial 1]"", ""[diferencial 2]""],
     ""barreiras_entrada"": [""[barreira 1]"", ""[barreira 2]""],
-    ""tendencias"": [""[tendência 1]"", ""[tendência 2]""],
+    ""tendencias"": [""[tendência relevante 1]"", ""[regulação 1]""],
     ""metricas"": {{
-      ""tamanho_mercado"": ""[estimativa]"",
-      ""ticket_medio"": ""[valor estimado]"",
-      ""frequencia_uso"": ""[diária/semanal/mensal]""
+      ""tamanho_nicho"": ""[estimativa de mercado]"",
+      ""ticket_medio_inicial"": ""[valor estimado]"",
+      ""frequencia_uso"": ""[diária/semanal/mensal]"",
+      ""outras_metricas"": [""[métrica adicional 1]"", ""[métrica adicional 2]""]
     }}
   }},
   ""personas"": [
     {{
       ""nome"": ""[Nome da Persona 1]"",
-      ""perfil"": ""[descrição do perfil]"",
+      ""perfil_contexto"": {{
+        ""papel"": ""[função/cargo]"",
+        ""tamanho_empresa"": ""[pequena/média/grande]"",
+        ""responsabilidades"": [""[responsabilidade 1]"", ""[responsabilidade 2]""]
+      }},
       ""objetivos"": [""[objetivo 1]"", ""[objetivo 2]""],
-      ""dores"": [""[dor 1]"", ""[dor 2]""],
+      ""dores_especificas"": [""[dor relacionada à ideia 1]"", ""[dor 2]""],
       ""criterios_decisao"": [""[critério 1]"", ""[critério 2]""],
-      ""objecoes"": [""[objeção 1]"", ""[objeção 2]""],
-      ""canais_acesso"": [""[canal 1]"", ""[canal 2]""]
+      ""objecoes_comuns"": [""[objeção 1]"", ""[objeção 2]""],
+      ""canais_acesso"": [""[onde encontrar]"", ""[como abordar]""]
     }},
     {{
       ""nome"": ""[Nome da Persona 2]"",
-      ""perfil"": ""[descrição do perfil]"",
+      ""perfil_contexto"": {{
+        ""papel"": ""[função/cargo]"",
+        ""tamanho_empresa"": ""[pequena/média/grande]"",
+        ""responsabilidades"": [""[responsabilidade 1]"", ""[responsabilidade 2]""]
+      }},
       ""objetivos"": [""[objetivo 1]"", ""[objetivo 2]""],
-      ""dores"": [""[dor 1]"", ""[dor 2]""],
+      ""dores_especificas"": [""[dor relacionada à ideia 1]"", ""[dor 2]""],
       ""criterios_decisao"": [""[critério 1]"", ""[critério 2]""],
-      ""objecoes"": [""[objeção 1]"", ""[objeção 2]""],
-      ""canais_acesso"": [""[canal 1]"", ""[canal 2]""]
+      ""objecoes_comuns"": [""[objeção 1]"", ""[objeção 2]""],
+      ""canais_acesso"": [""[onde encontrar]"", ""[como abordar]""]
+    }},
+    {{
+      ""nome"": ""[Nome da Persona 3]"",
+      ""perfil_contexto"": {{
+        ""papel"": ""[função/cargo]"",
+        ""tamanho_empresa"": ""[pequena/média/grande]"",
+        ""responsabilidades"": [""[responsabilidade 1]"", ""[responsabilidade 2]""]
+      }},
+      ""objetivos"": [""[objetivo 1]"", ""[objetivo 2]""],
+      ""dores_especificas"": [""[dor relacionada à ideia 1]"", ""[dor 2]""],
+      ""criterios_decisao"": [""[critério 1]"", ""[critério 2]""],
+      ""objecoes_comuns"": [""[objeção 1]"", ""[objeção 2]""],
+      ""canais_acesso"": [""[onde encontrar]"", ""[como abordar]""]
     }}
   ],
   ""proposta_valor_inicial"": {{
     ""frase_valor"": ""[1 sentença de valor]"",
-    ""jobs_to_be_done"": [""[job 1]"", ""[job 2]"", ""[job 3]""],
-    ""diferenciais"": [""[diferencial 1]"", ""[diferencial 2]""]
+    ""jobs_to_be_done"": [""[job 1]"", ""[job 2]"", ""[job 3]"", ""[job 4]"", ""[job 5]""],
+    ""dores_ganhos"": [""[dor/ganho 1]"", ""[dor/ganho 2]"", ""[dor/ganho 3]""],
+    ""diferenciais_especificos"": [""[diferencial vs alternativa 1]"", ""[diferencial 2]"", ""[diferencial 3]""]
   }},
-  ""resumo"": {{
-    ""oportunidade"": ""[síntese da oportunidade]"",
-    ""publico_prioritario"": ""[público principal]"",
-    ""hipotese_valor"": ""[hipótese de proposta de valor]"",
-    ""faixa_preco"": ""[recomendação inicial]"",
-    ""incertezas"": [""[incerteza 1]"", ""[incerteza 2]"", ""[incerteza 3]""]
+  ""resumo_ideia"": {{
+    ""sintese_oportunidade"": ""[síntese clara da oportunidade]"",
+    ""publico_prioritario"": ""[público principal a focar]"",
+    ""hipotese_proposta_valor"": ""[hipótese de proposta de valor]"",
+    ""faixa_preco_monetizacao"": ""[recomendação inicial de preço ou modelo]"",
+    ""incertezas_validar"": [""[incerteza 1 a validar]"", ""[incerteza 2]"", ""[incerteza 3]""]
   }}
 }}
 ```
