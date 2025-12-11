@@ -369,7 +369,7 @@ namespace IdeorAI.Client
                     {
                         temperature = 0.3,
                         topP = 0.6,
-                        maxOutputTokens = 2048,
+                        maxOutputTokens = 8000,
                         response_mime_type = "application/json"
                     }
                 };
@@ -518,7 +518,7 @@ namespace IdeorAI.Client
                 {
                     temperature = 0.9,
                     topP = 0.9,
-                    maxOutputTokens = 768,
+                    maxOutputTokens = 8000,
                     response_mime_type = "application/json"
                 }
             };
@@ -613,7 +613,7 @@ Total por ideia: máximo 400 caracteres.";
                 {
                     temperature = 0.5,
                     topP = 0.9,
-                    maxOutputTokens = 2048,
+                    maxOutputTokens = 8000,
                     response_mime_type = "application/json"
                 }
             };
