@@ -249,6 +249,16 @@ builder.Services.AddCors(opt =>
                 return true;
             }
 
+            // Permitir domínio de produção Hostinger (www.ideorai.com e ideorai.com)
+            if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase) ||
+                origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase) ||
+                origin.Equals("http://www.ideorai.com", StringComparison.OrdinalIgnoreCase) ||
+                origin.Equals("http://ideorai.com", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Information("CORS: Origin IdeorAI (Hostinger) detectado - PERMITIDO");
+                return true;
+            }
+
             Log.Warning("CORS: Origin '{Origin}' não corresponde a nenhuma regra - REJEITADO", origin);
             return false;
         })
