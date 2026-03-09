@@ -77,10 +77,10 @@ namespace IdeorAI.Client
 
         /// <summary>
         /// Seleciona modelo Gemini baseado em rotação para evitar rate limiting.
-        /// Estratégia: Rotaciona entre 3 modelos para distribuir requisições
-        /// - gemini-2.0-flash-exp: Modelo principal (etapas complexas: 1, 3, 5, 7)
+        /// Estratégia: Rotaciona entre modelos válidos para distribuir requisições
+        /// - gemini-2.5-flash: Modelo principal (etapas complexas: 1, 3, 5, 7)
         /// - gemini-2.5-flash: Modelo secundário (etapas intermediárias: 2, 4, 6)
-        /// - gemini-flash-1.5: Modelo leve (requisições menores: geração de ideias, debug)
+        /// - gemini-2.0-flash: Modelo leve (requisições menores: geração de ideias, debug)
         /// </summary>
         private string GetModelForStage(string? stage = null)
         {
@@ -90,29 +90,29 @@ namespace IdeorAI.Client
                 var hash = DateTime.UtcNow.Ticks % 3;
                 return hash switch
                 {
-                    0 => "gemini-2.0-flash-exp",
+                    0 => "gemini-2.5-flash",
                     1 => "gemini-2.5-flash",
-                    _ => "gemini-flash-1.5"
+                    _ => "gemini-2.0-flash"
                 };
             }
 
             // Rotação inteligente baseada na etapa (evita sobrecarga de um único modelo)
             return stage.ToLower() switch
             {
-                // Etapas complexas (prompts longos) → gemini-2.0-flash-exp
-                "etapa1" => "gemini-2.0-flash-exp",  // Problema e Oportunidade
-                "etapa3" => "gemini-2.0-flash-exp",  // Proposta de Valor
-                "etapa5" => "gemini-2.0-flash-exp",  // MVP
-                "etapa7" => "gemini-2.0-flash-exp",  // Pitch Deck + Plano Executivo
+                // Etapas complexas (prompts longos) → gemini-2.5-flash
+                "etapa1" => "gemini-2.5-flash",  // Problema e Oportunidade
+                "etapa3" => "gemini-2.5-flash",  // Proposta de Valor
+                "etapa5" => "gemini-2.5-flash",  // MVP
+                "etapa7" => "gemini-2.5-flash",  // Pitch Deck + Plano Executivo
 
                 // Etapas intermediárias → gemini-2.5-flash
                 "etapa2" => "gemini-2.5-flash",      // Pesquisa de Mercado
                 "etapa4" => "gemini-2.5-flash",      // Modelo de Negócio
                 "etapa6" => "gemini-2.5-flash",      // Equipe Mínima
 
-                // Geração de ideias (prompt menor) → gemini-flash-1.5 (modelo leve)
-                "ideas" => "gemini-flash-1.5",
-                "debug" => "gemini-flash-1.5",
+                // Geração de ideias (prompt menor) → gemini-2.0-flash (modelo válido e leve)
+                "ideas" => "gemini-2.0-flash",
+                "debug" => "gemini-2.0-flash",
 
                 // Fallback para etapas não mapeadas
                 _ => "gemini-2.5-flash"
