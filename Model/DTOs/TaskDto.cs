@@ -67,4 +67,5 @@ public class GenerateDocumentResponseDto
     public string ModelUsed { get; set; } = null!;
     public int TokensUsed { get; set; }
     public string Status { get; set; } = null!;
+    public bool StageSaved { get; set; }
 }

@@ -14,8 +14,11 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly Supabase.Client _supabase;
     private readonly GeminiApiClient _geminiClient;
     private readonly IStageService _stageService;
+    private readonly IStageSummaryService _stageSummaryService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
+
+    private const int MaxContextLength = 3500;
 
     // Mapeamento de etapas para títulos
     private static readonly Dictionary<string, string> StageTitles = new()
@@ -33,12 +36,14 @@ public class DocumentGenerationService : IDocumentGenerationService
         Supabase.Client supabase,
         GeminiApiClient geminiClient,
         IStageService stageService,
+        IStageSummaryService stageSummaryService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration)
     {
         _supabase = supabase;
         _geminiClient = geminiClient;
         _stageService = stageService;
+        _stageSummaryService = stageSummaryService;
         _logger = logger;
         _configuration = configuration;
     }
@@ -67,6 +72,42 @@ public class DocumentGenerationService : IDocumentGenerationService
         {
             var valuePreview = kvp.Value.Length > 100 ? kvp.Value.Substring(0, 100) + "..." : kvp.Value;
             _logger.LogInformation("[DocumentGeneration] Input [{Key}]: {Value}", kvp.Key, valuePreview);
+        }
+
+        // Buscar contexto acumulado das etapas anteriores (se não for etapa 1)
+        string contextPrompt = "";
+        if (stage.ToLower() != "etapa1")
+        {
+            try
+            {
+                _logger.LogInformation("[DocumentGeneration] Buscando contexto acumulado para {Stage}...", stage);
+                var previousSummaries = await _stageSummaryService.GetPreviousStagesAsync(projectId, stage);
+                
+                if (previousSummaries.Any())
+                {
+                    var contextParts = previousSummaries.Select(s => $"[{s.Stage}] {s.SummaryText}");
+                    var fullContext = string.Join("\n", contextParts);
+                    
+                    // Limitar contexto a 3500 caracteres
+                    if (fullContext.Length > MaxContextLength)
+                    {
+                        fullContext = fullContext.Substring(0, MaxContextLength - 3) + "...";
+                    }
+                    
+                    contextPrompt = $"\n\n## CONTEXTO DAS ETAPAS ANTERIORES:\n{fullContext}\n\nUse esse contexto para manter consistência com o que já foi definido.\n";
+                    
+                    _logger.LogInformation("[DocumentGeneration] Contexto acumulado adicionado: {Length} caracteres de {Count} etapas anteriores",
+                        contextPrompt.Length, previousSummaries.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("[DocumentGeneration] Nenhum contexto anterior encontrado para {Stage}", stage);
+                }
+            }
+            catch (Exception ctxEx)
+            {
+                _logger.LogWarning(ctxEx, "[DocumentGeneration] Falha ao buscar contexto acumulado (continuando sem contexto)");
+            }
         }
 
         // Gerar o prompt (3 níveis: full, resumido, mini)
@@ -104,6 +145,9 @@ public class DocumentGenerationService : IDocumentGenerationService
                     prompt = PromptMiniResumidos.GetPromptForStage(stage, inputs);
                     break;
             }
+
+            // Adicionar contexto acumulado ao prompt
+            prompt += contextPrompt;
 
             _logger.LogInformation("[DocumentGeneration] Prompt gerado com sucesso. Modo: {Mode}, Comprimento: {Length} caracteres",
                 promptMode, prompt.Length);
@@ -204,6 +248,9 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         _logger.LogInformation("[DocumentGeneration] ✅ Documento gerado com sucesso! TaskId: {TaskId}, Stage: {Stage}", createdTask.Id, stage);
 
+        // Sanitizar JSON e salvar resumo da etapa
+        await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
+
         return createdTask;
     }
 
@@ -221,6 +268,41 @@ public class DocumentGenerationService : IDocumentGenerationService
             return null;
         }
 
+        var projectId = task.ProjectId;
+        var stage = task.Phase;
+
+        // Buscar contexto acumulado das etapas anteriores (se não for etapa 1)
+        string contextPrompt = "";
+        if (stage.ToLower() != "etapa1")
+        {
+            try
+            {
+                _logger.LogInformation("[DocumentGeneration] Buscando contexto acumulado para regeneração de {Stage}...", stage);
+                var previousSummaries = await _stageSummaryService.GetPreviousStagesAsync(projectId, stage);
+                
+                if (previousSummaries.Any())
+                {
+                    var contextParts = previousSummaries.Select(s => $"[{s.Stage}] {s.SummaryText}");
+                    var fullContext = string.Join("\n", contextParts);
+                    
+                    // Limitar contexto a 3500 caracteres
+                    if (fullContext.Length > MaxContextLength)
+                    {
+                        fullContext = fullContext.Substring(0, MaxContextLength - 3) + "...";
+                    }
+                    
+                    contextPrompt = $"\n\n## CONTEXTO DAS ETAPAS ANTERIORES:\n{fullContext}\n\nUse esse contexto para manter consistência com o que já foi definido.\n";
+                    
+                    _logger.LogInformation("[DocumentGeneration] Contexto acumulado adicionado para regeneração: {Length} caracteres",
+                        contextPrompt.Length);
+                }
+            }
+            catch (Exception ctxEx)
+            {
+                _logger.LogWarning(ctxEx, "[DocumentGeneration] Falha ao buscar contexto acumulado (continuando sem contexto)");
+            }
+        }
+
         // Gerar novo prompt com novos inputs (usando versão simplificada em dev, completa em produção)
         string prompt;
         try
@@ -229,16 +311,19 @@ public class DocumentGenerationService : IDocumentGenerationService
 
             if (useSimplified)
             {
-                prompt = PromptResumidos.GetPromptForStage(task.Phase, newInputs);
+                prompt = PromptResumidos.GetPromptForStage(stage, newInputs);
             }
             else
             {
-                prompt = PromptTemplates.GetPromptForStage(task.Phase, newInputs);
+                prompt = PromptTemplates.GetPromptForStage(stage, newInputs);
             }
+
+            // Adicionar contexto acumulado ao prompt
+            prompt += contextPrompt;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating prompt for stage {Stage}", task.Phase);
+            _logger.LogError(ex, "Error generating prompt for stage {Stage}", stage);
             return null;
         }
 
@@ -288,6 +373,9 @@ public class DocumentGenerationService : IDocumentGenerationService
         {
             _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was regenerated successfully", taskId);
         }
+
+        // Sanitizar JSON e salvar resumo da etapa
+        await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
         _logger.LogInformation("Document regenerated successfully for task {TaskId}", taskId);
 
@@ -371,6 +459,42 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
         _logger.LogInformation("Document refined successfully for task {TaskId}", taskId);
 
         return updatedTask;
+    }
+
+    /// <summary>
+    /// Sanitiza JSON, gera summary_text e salva na tabela project_stage_summaries
+    /// </summary>
+    private async Task SaveStageSummaryAsync(Guid projectId, Guid userId, string stage, string generatedContent)
+    {
+        try
+        {
+            _logger.LogInformation("[DocumentGeneration] Sanitizando JSON e salvando resumo para {Stage}...", stage);
+
+            // Extrair e validar JSON
+            var extractedJson = JsonSanitizer.ExtractJson(generatedContent);
+            
+            if (!JsonSanitizer.TryValidateSchema(extractedJson, stage, out var jsonDoc, out var errorMessage))
+            {
+                _logger.LogWarning("[DocumentGeneration] JSON inválido para {Stage}: {Error}", stage, errorMessage);
+                // Não falha a operação, apenas loga o erro
+                return;
+            }
+
+            // Gerar summary_text
+            var summaryText = SummaryTextGenerator.Generate(stage, jsonDoc!.RootElement);
+            
+            _logger.LogInformation("[DocumentGeneration] Summary_text gerado: {Length} caracteres", summaryText.Length);
+
+            // Fazer UPSERT no banco
+            await _stageSummaryService.UpsertAsync(projectId, userId, stage, jsonDoc.RootElement, summaryText);
+            
+            _logger.LogInformation("[DocumentGeneration] Resumo da etapa salvo com sucesso");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DocumentGeneration] Erro ao salvar resumo da etapa {Stage} (não crítico)", stage);
+            // Não falha a operação principal se o resumo falhar
+        }
     }
 
     /// <summary>

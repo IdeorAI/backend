@@ -197,6 +197,28 @@ public class ProjectService : IProjectService
         });
     }
 
+    /// <summary>
+    /// Verifica se um usuário tem acesso a um projeto
+    /// </summary>
+    public async Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId)
+    {
+        try
+        {
+            var response = await _supabase
+                .From<ProjectModel>()
+                .Where(x => x.Id == projectId.ToString() && x.OwnerId == userId.ToString())
+                .Get();
+
+            return response.Models?.Any() ?? false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ProjectService] Erro ao verificar acesso do usuário {UserId} ao projeto {ProjectId}", 
+                userId, projectId);
+            return false;
+        }
+    }
+
     // Helper para converter ProjectModel (Supabase) para Project (Entity)
     private Project MapToEntity(ProjectModel model)
     {

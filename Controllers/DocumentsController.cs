@@ -14,15 +14,21 @@ public class DocumentsController : ControllerBase
 {
     private readonly IDocumentGenerationService _documentService;
     private readonly IPdfExportService _pdfExportService;
+    private readonly IStageService _stageService;
+    private readonly IStageSummaryService _stageSummaryService;
     private readonly ILogger<DocumentsController> _logger;
 
     public DocumentsController(
         IDocumentGenerationService documentService,
         IPdfExportService pdfExportService,
+        IStageService stageService,
+        IStageSummaryService stageSummaryService,
         ILogger<DocumentsController> logger)
     {
         _documentService = documentService;
         _pdfExportService = pdfExportService;
+        _stageService = stageService;
+        _stageSummaryService = stageSummaryService;
         _logger = logger;
     }
 
@@ -49,14 +55,30 @@ public class DocumentsController : ControllerBase
             return BadRequest(new { error = "Failed to generate document. Check project access and stage." });
         }
 
+        // Validar se o JSON foi salvo corretamente
+        bool stageSaved = false;
+        try
+        {
+            var extractedJson = JsonSanitizer.ExtractJson(task.Content ?? "");
+            if (JsonSanitizer.TryValidateSchema(extractedJson, dto.Phase, out _, out _))
+            {
+                stageSaved = true;
+            }
+        }
+        catch
+        {
+            stageSaved = false;
+        }
+
         return Ok(new GenerateDocumentResponseDto
         {
             TaskId = task.Id,
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
-            ModelUsed = "rotação-inteligente",  // Rotaciona entre gemini-2.0-flash-exp, gemini-2.5-flash, gemini-flash-1.5
+            ModelUsed = "rotação-inteligente",
             TokensUsed = EstimateTokens(task.Content ?? ""),
-            Status = task.Status
+            Status = task.Status,
+            StageSaved = stageSaved
         });
     }
 
@@ -71,6 +93,26 @@ public class DocumentsController : ControllerBase
     {
         _logger.LogInformation("Regenerating document for task {TaskId}", taskId);
 
+        // Buscar a task atual para obter projectId e stage
+        // Precisamos invalidar etapas posteriores antes de regenerar
+        var existingTask = await _stageService.GetTaskByIdAsync(taskId, userId);
+        if (existingTask == null)
+        {
+            return NotFound(new { error = "Task not found or access denied" });
+        }
+
+        // Invalidar etapas posteriores ao regenerar
+        try
+        {
+            _logger.LogInformation("Invalidando etapas posteriores a {Stage} no projeto {ProjectId}", 
+                existingTask.Phase, existingTask.ProjectId);
+            await _stageSummaryService.DeleteSubsequentStagesAsync(existingTask.ProjectId, existingTask.Phase);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Falha ao invalidar etapas posteriores (continuando)");
+        }
+
         var task = await _documentService.RegenerateDocumentAsync(taskId, userId, newInputs);
 
         if (task == null)
@@ -78,14 +120,30 @@ public class DocumentsController : ControllerBase
             return NotFound(new { error = "Task not found or access denied" });
         }
 
+        // Validar se o JSON foi salvo corretamente
+        bool stageSaved = false;
+        try
+        {
+            var extractedJson = JsonSanitizer.ExtractJson(task.Content ?? "");
+            if (JsonSanitizer.TryValidateSchema(extractedJson, task.Phase, out _, out _))
+            {
+                stageSaved = true;
+            }
+        }
+        catch
+        {
+            stageSaved = false;
+        }
+
         return Ok(new GenerateDocumentResponseDto
         {
             TaskId = task.Id,
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
-            ModelUsed = "rotação-inteligente",  // Rotaciona entre gemini-2.0-flash-exp, gemini-2.5-flash, gemini-flash-1.5
+            ModelUsed = "rotação-inteligente",
             TokensUsed = EstimateTokens(task.Content ?? ""),
-            Status = task.Status
+            Status = task.Status,
+            StageSaved = stageSaved
         });
     }
 

@@ -65,4 +65,12 @@ public interface IProjectService
     /// <param name="progressData">Dados de progresso (será serializado para jsonb)</param>
     /// <returns>Projeto atualizado ou null se não autorizado</returns>
     Task<Project?> UpdateProgressAsync(Guid projectId, Guid userId, object progressData);
+
+    /// <summary>
+    /// Verifica se um usuário tem acesso a um projeto
+    /// </summary>
+    /// <param name="userId">ID do usuário</param>
+    /// <param name="projectId">ID do projeto</param>
+    /// <returns>True se o usuário tem acesso</returns>
+    Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId);
 }
