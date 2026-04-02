@@ -96,7 +96,7 @@ public class StageSummaryService : IStageSummaryService
             var response = await _supabase
                 .From<ProjectStageSummaryModel>()
                 .Where(x => x.ProjectId == projectId.ToString())
-                .Order(x => x.Stage, Postgrest.Ordering.Ascending)
+                .Order(x => x.Stage, global::Supabase.Postgrest.Ordering.Ascending)
                 .Get();
 
             return response.Models?.ToList() ?? new List<ProjectStageSummaryModel>();
