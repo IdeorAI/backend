@@ -10,13 +10,13 @@ namespace IdeorAI.Services;
 /// </summary>
 public class StageSummaryService : IStageSummaryService
 {
-    private readonly Client _supabase;
+    private readonly Supabase.Client _supabase;
     private readonly ILogger<StageSummaryService> _logger;
 
     // Ordem das etapas para comparação
     private static readonly string[] StageOrder = { "etapa1", "etapa2", "etapa3", "etapa4", "etapa5" };
 
-    public StageSummaryService(Client supabase, ILogger<StageSummaryService> logger)
+    public StageSummaryService(Supabase.Client supabase, ILogger<StageSummaryService> logger)
     {
         _supabase = supabase;
         _logger = logger;

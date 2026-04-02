@@ -1,5 +1,4 @@
 using IdeorAI.Model.SupabaseModels;
-using Supabase;
 using System.Text.Json;
 
 namespace IdeorAI.Services;
