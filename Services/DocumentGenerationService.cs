@@ -20,6 +20,7 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly IConfiguration _configuration;
 
     private const int MaxContextLength = 3500;
+    private const int MaxInputLength = 500;
 
     // Mapeamento de etapas para títulos
     private static readonly Dictionary<string, string> StageTitles = new()
@@ -69,12 +70,12 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         _logger.LogInformation("[DocumentGeneration] Stage válido. Título: {Title}", StageTitles[stage]);
 
-        // Log dos inputs recebidos
-        _logger.LogInformation("[DocumentGeneration] Inputs recebidos: {InputCount} campos", inputs.Count);
+        // Log dos inputs recebidos (apenas em debug para não poluir produção)
+        _logger.LogDebug("[DocumentGeneration] Inputs recebidos: {InputCount} campos", inputs.Count);
         foreach (var kvp in inputs)
         {
             var valuePreview = kvp.Value.Length > 100 ? kvp.Value.Substring(0, 100) + "..." : kvp.Value;
-            _logger.LogInformation("[DocumentGeneration] Input [{Key}]: {Value}", kvp.Key, valuePreview);
+            _logger.LogDebug("[DocumentGeneration] Input [{Key}]: {Value}", kvp.Key, valuePreview);
         }
 
         // Invalidar etapas posteriores se estivermos regenerando uma etapa existente
@@ -102,15 +103,15 @@ public class DocumentGenerationService : IDocumentGenerationService
             if (project != null)
             {
                 if (!string.IsNullOrEmpty(project.Region))
-                    inputs["regiao"] = project.Region;
+                    inputs["regiao"] = SanitizeInput(project.Region);
                 
                 if (!string.IsNullOrEmpty(project.Constraints))
-                    inputs["restricoes"] = project.Constraints;
+                    inputs["restricoes"] = SanitizeInput(project.Constraints);
 
                 // Se não tiver ideia nos inputs, tenta pegar da descrição
                 if (!inputs.ContainsKey("ideia") || string.IsNullOrEmpty(inputs["ideia"]))
                 {
-                    inputs["ideia"] = project.Name;
+                    inputs["ideia"] = SanitizeInput(project.Name);
                 }
             }
         }
@@ -566,5 +567,31 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
             var wrappedJson = JsonSerializer.Serialize(new { content = content });
             return JsonDocument.Parse(wrappedJson);
         }
+    }
+
+    /// <summary>
+    /// Sanitiza input do usuário para prevenir prompt injection
+    /// Remove caracteres de controle, sequências suspeitas e limita comprimento
+    /// </summary>
+    private string SanitizeInput(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return string.Empty;
+        
+        // Limitar comprimento
+        if (input.Length > MaxInputLength)
+            input = input.Substring(0, MaxInputLength);
+        
+        // Remover sequências suspeitas que podem indicar prompt injection
+        input = input.Replace("```", "")
+                     .Replace("System:", "")
+                     .Replace("Instruction:", "")
+                     .Replace("Ignore previous", "")
+                     .Replace("ignore previous", "")
+                     .Replace("System instruction", "")
+                     .Replace("Override", "")
+                     .Replace("override", "");
+        
+        return input.Trim();
     }
 }

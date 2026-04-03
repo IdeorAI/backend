@@ -140,7 +140,7 @@ public class StageSummariesController : ControllerBase
                         {
                             var prevSummary = summariesDict[prevStage];
                             // Se a etapa anterior foi atualizada depois desta, esta está inválida
-                            if (prevSummary.UpdatedAt > summary.UpdatedAt)
+                            if (prevSummary != null && summary != null && prevSummary.UpdatedAt > summary.UpdatedAt)
                             {
                                 isInvalidated = true;
                                 break;

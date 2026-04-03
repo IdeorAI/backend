@@ -171,11 +171,12 @@ public class StageSummaryService : IStageSummaryService
             _logger.LogInformation("[StageSummary] Deletando etapas posteriores a {Stage}: {Stages}", 
                 stage, string.Join(", ", subsequentStages));
 
-            foreach (var subsequentStage in subsequentStages)
+            // B-03: Batch delete ao invés de loop N+1
+            if (subsequentStages.Any())
             {
                 await _supabase
                     .From<ProjectStageSummaryModel>()
-                    .Where(x => x.ProjectId == projectId.ToString() && x.Stage == subsequentStage)
+                    .Where(x => x.ProjectId == projectId.ToString() && subsequentStages.Contains(x.Stage))
                     .Delete();
             }
 
