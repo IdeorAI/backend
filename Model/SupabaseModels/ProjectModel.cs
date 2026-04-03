@@ -46,6 +46,12 @@ public class ProjectModel : BaseModel
     [Column("target_audience")]
     public string? TargetAudience { get; set; }
 
+    [Column("region")]
+    public string? Region { get; set; }
+
+    [Column("constraints")]
+    public string? Constraints { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
 

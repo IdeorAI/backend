@@ -117,7 +117,7 @@ public class StageSummariesController : ControllerBase
         try
         {
             var summaries = await _stageSummaryService.GetByProjectAsync(projectId);
-            var stagesWithSummaries = summaries.Select(s => s.Stage).ToHashSet();
+            var summariesDict = summaries.ToDictionary(s => s.Stage?.ToLower() ?? "", s => s);
 
             // Verificar todas as 5 etapas do MVP
             var allStages = new[] { "etapa1", "etapa2", "etapa3", "etapa4", "etapa5" };
@@ -126,54 +126,57 @@ public class StageSummariesController : ControllerBase
             for (int i = 0; i < allStages.Length; i++)
             {
                 var stage = allStages[i];
-                var hasSummary = stagesWithSummaries.Contains(stage);
+                var summary = summariesDict.ContainsKey(stage) ? summariesDict[stage] : null;
+                var hasSummary = summary != null;
                 
-                // Verificar se etapas posteriores existem (para detectar invalidação)
-                var subsequentStagesExist = allStages
-                    .Skip(i + 1)
-                    .Any(s => stagesWithSummaries.Contains(s));
+                // Verificar se alguma etapa anterior foi atualizada APÓS esta etapa
+                var isInvalidated = false;
+                if (hasSummary && i > 0)
+                {
+                    var previousStages = allStages.Take(i);
+                    foreach (var prevStage in previousStages)
+                    {
+                        if (summariesDict.ContainsKey(prevStage))
+                        {
+                            var prevSummary = summariesDict[prevStage];
+                            // Se a etapa anterior foi atualizada depois desta, esta está inválida
+                            if (prevSummary.UpdatedAt > summary.UpdatedAt)
+                            {
+                                isInvalidated = true;
+                                break;
+                            }
+                        }
+                    }
+                }
 
-                StageStatusDto status;
+                string status;
+                string message;
+
                 if (!hasSummary)
                 {
-                    status = new StageStatusDto
-                    {
-                        StageNumber = i + 1,
-                        Stage = stage,
-                        HasSummary = false,
-                        IsValid = false,
-                        Status = "pending",
-                        Message = "Contexto pendente"
-                    };
+                    status = "pending";
+                    message = "Contexto pendente";
                 }
-                else if (subsequentStagesExist && i < allStages.Length - 1)
+                else if (isInvalidated)
                 {
-                    // Se tem resumo mas etapas posteriores foram geradas depois,
-                    // pode estar desatualizado
-                    status = new StageStatusDto
-                    {
-                        StageNumber = i + 1,
-                        Stage = stage,
-                        HasSummary = true,
-                        IsValid = true,
-                        Status = "valid",
-                        Message = "Contexto salvo"
-                    };
+                    status = "invalidated";
+                    message = "Precisa ser regerado (etapa anterior modificada)";
                 }
                 else
                 {
-                    status = new StageStatusDto
-                    {
-                        StageNumber = i + 1,
-                        Stage = stage,
-                        HasSummary = true,
-                        IsValid = true,
-                        Status = "valid",
-                        Message = "Contexto salvo"
-                    };
+                    status = "valid";
+                    message = "Contexto salvo";
                 }
 
-                stageStatuses.Add(status);
+                stageStatuses.Add(new StageStatusDto
+                {
+                    StageNumber = i + 1,
+                    Stage = stage,
+                    HasSummary = hasSummary,
+                    IsValid = status == "valid",
+                    Status = status,
+                    Message = message
+                });
             }
 
             var response = new StageStatusesResponseDto

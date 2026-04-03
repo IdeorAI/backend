@@ -40,17 +40,23 @@ public static class SummaryTextGenerator
                 parts.Add($"Problema: {GetStringValue(dor)}");
         }
 
-        // Público
-        if (json.TryGetProperty("publico_alvo", out var publico))
-            parts.Add($"Público: {GetStringValue(publico)}");
+        // Público (agora dentro de sintese ou nivel raiz)
+        if (json.TryGetProperty("sintese", out var sintese))
+        {
+            if (sintese.TryGetProperty("publico_prioritario", out var publico))
+                parts.Add($"Público: {GetStringValue(publico)}");
+        }
 
         // Personas
         if (json.TryGetProperty("personas", out var personas) && personas.ValueKind == JsonValueKind.Array)
             parts.Add($"Personas: {personas.GetArrayLength()}");
 
-        // Hipóteses
-        if (json.TryGetProperty("hipoteses_valor", out var hipoteses) && hipoteses.ValueKind == JsonValueKind.Array)
-            parts.Add($"Hipóteses: {hipoteses.GetArrayLength()}");
+        // Hipóteses (agora na sintese)
+        if (json.TryGetProperty("sintese", out var sintese2))
+        {
+            if (sintese2.TryGetProperty("hipotese_monetizacao", out var hipotese))
+                parts.Add($"Hipótese: {GetStringValue(hipotese)}");
+        }
 
         return Truncate(string.Join(". ", parts));
     }
@@ -64,16 +70,25 @@ public static class SummaryTextGenerator
         var parts = new List<string>();
 
         // TAM
-        if (json.TryGetProperty("tam", out var tam) && tam.TryGetProperty("valor", out var tamValor))
-            parts.Add($"TAM: {GetStringValue(tamValor)}");
+        if (json.TryGetProperty("dimensionamento_mercado", out var dim))
+        {
+            if (dim.TryGetProperty("tam", out var tam) && tam.TryGetProperty("valor", out var tamValor))
+                parts.Add($"TAM: {GetStringValue(tamValor)}");
+        }
 
         // Concorrentes
-        if (json.TryGetProperty("concorrentes", out var concorrentes) && concorrentes.ValueKind == JsonValueKind.Array)
-            parts.Add($"Concorrentes: {concorrentes.GetArrayLength()}");
+        if (json.TryGetProperty("analise_competitiva", out var comp))
+        {
+            if (comp.TryGetProperty("concorrentes_diretos", out var diretos) && diretos.ValueKind == JsonValueKind.Array)
+                parts.Add($"Concorrentes Diretos: {diretos.GetArrayLength()}");
+        }
 
-        // Oportunidade
-        if (json.TryGetProperty("oportunidade_resumo", out var oportunidade))
-            parts.Add($"Oportunidade: {GetStringValue(oportunidade)}");
+        // Preço
+        if (json.TryGetProperty("validacao_preco", out var preco))
+        {
+            if (preco.TryGetProperty("faixa_preco_sugerida", out var faixa))
+                parts.Add($"Preço Sugerido: {GetStringValue(faixa)}");
+        }
 
         return Truncate(string.Join(". ", parts));
     }
@@ -86,17 +101,19 @@ public static class SummaryTextGenerator
     {
         var parts = new List<string>();
 
-        // Frase de valor
-        if (json.TryGetProperty("frase_valor", out var frase))
-            parts.Add($"Proposta: {GetStringValue(frase)}");
+        // Frase de valor (Headline)
+        if (json.TryGetProperty("proposta_valor_final", out var pvf))
+        {
+            if (pvf.TryGetProperty("headline", out var headline))
+                parts.Add($"Proposta: {GetStringValue(headline)}");
+        }
 
         // Diferencial
-        if (json.TryGetProperty("diferencial_vs_alternativas", out var diferencial))
-            parts.Add($"Diferencial: {GetStringValue(diferencial)}");
-
-        // Métrica
-        if (json.TryGetProperty("metrica_norteadora", out var metrica))
-            parts.Add($"Métrica: {GetStringValue(metrica)}");
+        if (json.TryGetProperty("posicionamento", out var pos))
+        {
+            if (pos.TryGetProperty("porque", out var razao))
+                parts.Add($"Diferencial: {GetStringValue(razao)}");
+        }
 
         return Truncate(string.Join(". ", parts));
     }
@@ -112,23 +129,25 @@ public static class SummaryTextGenerator
         // Fontes de receita
         if (json.TryGetProperty("business_model_canvas", out var canvas))
         {
-            if (canvas.TryGetProperty("fontes_receita", out var fontes) && 
-                fontes.ValueKind == JsonValueKind.Array && 
-                fontes.GetArrayLength() > 0)
+            if (canvas.TryGetProperty("fluxos_receita", out var fluxos) && 
+                fluxos.ValueKind == JsonValueKind.Array && 
+                fluxos.GetArrayLength() > 0)
             {
-                var primeiraFonte = fontes[0];
+                var primeiraFonte = fluxos[0];
                 if (primeiraFonte.TryGetProperty("tipo", out var tipoReceita))
                     parts.Add($"Receita: {GetStringValue(tipoReceita)}");
             }
-
-            // Canais
-            if (canvas.TryGetProperty("canais", out var canais) && canais.ValueKind == JsonValueKind.Array)
-                parts.Add($"Canais: {canais.GetArrayLength()}");
         }
 
-        // Viabilidade
-        if (json.TryGetProperty("viabilidade", out var viabilidade))
-            parts.Add($"Viabilidade: {GetStringValue(viabilidade)}");
+        // Viabilidade (Break-even)
+        if (json.TryGetProperty("projecao_financeira_simplificada", out var proj))
+        {
+            if (proj.TryGetProperty("ano_1", out var a1))
+            {
+                if (a1.TryGetProperty("break_even_months", out var be))
+                    parts.Add($"Break-even: {GetStringValue(be)} meses");
+            }
+        }
 
         return Truncate(string.Join(". ", parts));
     }
@@ -142,22 +161,24 @@ public static class SummaryTextGenerator
         var parts = new List<string>();
 
         // Funcionalidades
-        if (json.TryGetProperty("funcionalidades_core", out var funcionalidades) && 
-            funcionalidades.ValueKind == JsonValueKind.Array)
-            parts.Add($"Funcionalidades: {funcionalidades.GetArrayLength()}");
-
-        // Formatos
-        if (json.TryGetProperty("formatos_mvp", out var formatos) && formatos.ValueKind == JsonValueKind.Array)
+        if (json.TryGetProperty("definicao_mvp", out var mvp))
         {
-            var formatosList = new List<string>();
-            foreach (var formato in formatos.EnumerateArray())
-                formatosList.Add(GetStringValue(formato));
-            parts.Add($"Formato: {string.Join(", ", formatosList)}");
+            if (mvp.TryGetProperty("core_features", out var features) && 
+                features.ValueKind == JsonValueKind.Array)
+                parts.Add($"Core Features: {features.GetArrayLength()}");
         }
 
-        // Hipóteses
-        if (json.TryGetProperty("hipoteses_teste", out var hipoteses) && hipoteses.ValueKind == JsonValueKind.Array)
-            parts.Add($"Hipóteses: {hipoteses.GetArrayLength()}");
+        // Tempo/Roadmap
+        if (json.TryGetProperty("roadmap_3_meses", out var roadmap) && roadmap.ValueKind == JsonValueKind.Array)
+        {
+            parts.Add($"Roadmap: {roadmap.GetArrayLength()} meses");
+        }
+
+        // Stack
+        if (json.TryGetProperty("stack_tecnologica", out var stack))
+        {
+            parts.Add("Stack definida");
+        }
 
         return Truncate(string.Join(". ", parts));
     }

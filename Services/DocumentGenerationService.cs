@@ -14,6 +14,7 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly Supabase.Client _supabase;
     private readonly GeminiApiClient _geminiClient;
     private readonly IStageService _stageService;
+    private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
@@ -36,6 +37,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         Supabase.Client supabase,
         GeminiApiClient geminiClient,
         IStageService stageService,
+        IProjectService projectService,
         IStageSummaryService stageSummaryService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration)
@@ -43,6 +45,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         _supabase = supabase;
         _geminiClient = geminiClient;
         _stageService = stageService;
+        _projectService = projectService;
         _stageSummaryService = stageSummaryService;
         _logger = logger;
         _configuration = configuration;
@@ -72,6 +75,48 @@ public class DocumentGenerationService : IDocumentGenerationService
         {
             var valuePreview = kvp.Value.Length > 100 ? kvp.Value.Substring(0, 100) + "..." : kvp.Value;
             _logger.LogInformation("[DocumentGeneration] Input [{Key}]: {Value}", kvp.Key, valuePreview);
+        }
+
+        // Invalidar etapas posteriores se estivermos regenerando uma etapa existente
+        try
+        {
+            // Verificar se já existe um resumo para esta etapa
+            var existingSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+            var exists = existingSummaries.Any(s => s.Stage?.ToLower() == stage.ToLower());
+            
+            if (exists)
+            {
+                _logger.LogInformation("[DocumentGeneration] Etapa {Stage} já existe. Invalidando etapas posteriores...", stage);
+                await _stageSummaryService.DeleteSubsequentStagesAsync(projectId, stage);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DocumentGeneration] Falha ao invalidar etapas posteriores (continuando)");
+        }
+
+        // Enriquecer inputs com dados do projeto (Region e Constraints)
+        try
+        {
+            var project = await _projectService.GetByIdAsync(projectId, userId);
+            if (project != null)
+            {
+                if (!string.IsNullOrEmpty(project.Region))
+                    inputs["regiao"] = project.Region;
+                
+                if (!string.IsNullOrEmpty(project.Constraints))
+                    inputs["restricoes"] = project.Constraints;
+
+                // Se não tiver ideia nos inputs, tenta pegar da descrição
+                if (!inputs.ContainsKey("ideia") || string.IsNullOrEmpty(inputs["ideia"]))
+                {
+                    inputs["ideia"] = project.Name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DocumentGeneration] Falha ao enriquecer inputs com dados do projeto");
         }
 
         // Buscar contexto acumulado das etapas anteriores (se não for etapa 1)

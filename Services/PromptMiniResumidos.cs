@@ -12,30 +12,51 @@ public static class PromptMiniResumidos
     public static string Etapa1ProblemaOportunidade(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var segmento = inputs.GetValueOrDefault("segmento", "");
+        var regiao = inputs.GetValueOrDefault("regiao", "");
+        var restricoes = inputs.GetValueOrDefault("restricoes", "");
 
-        return $@"Analise esta startup: {ideia}
+        var premissas = "";
+        if (string.IsNullOrEmpty(segmento)) premissas += "Assuma segmento razoável. ";
+        if (string.IsNullOrEmpty(regiao)) premissas += "Assuma região padrão (Brasil). ";
+        if (string.IsNullOrEmpty(restricoes)) premissas += "Sem restrições específicas. ";
+
+        return $@"Você é um estrategista de Customer Development. Analise:
+- Ideia: {ideia}
+- Segmento: {(string.IsNullOrEmpty(segmento) ? "[assumir]" : segmento)}
+- Região: {(string.IsNullOrEmpty(regiao) ? "[assumir]" : regiao)}
+- Restrições: {(string.IsNullOrEmpty(restricoes) ? "[nenhuma]" : restricoes)}
+
+{premissas}
 
 Retorne JSON:
 ```json
 {{
   ""declaracao_problema"": {{
-    ""dor_central"": ""[dor em 1 frase]"",
-    ""quem_sente"": ""[público]"",
-    ""consequencias"": [""[consequência 1]"", ""[consequência 2]""]
+    ""dor_central"": ""[1 frase direta]"",
+    ""consequencias"": [""[consequência 1]"", ""[consequência 2]""],
+    ""quem_sente"": ""[persona resumida: setor, porte, função]"",
+    ""situacoes_gatilho"": [""[situação 1]"", ""[situação 2]""]
   }},
   ""mapa_mercado"": {{
-    ""segmentos_promissores"": [""[segmento 1]"", ""[segmento 2]""],
-    ""alternativas_atuais"": [""[alternativa 1]""],
-    ""diferenciais_potenciais"": [""[diferencial 1]"", ""[diferencial 2]""]
+    ""segmentos"": [""[subnicho 1]"", ""[subnicho 2]""],
+    ""alternativas_atuais"": [""[concorrente/gambiarra 1]""],
+    ""vazios"": [""[diferencial/oportunidade 1]""]
   }},
   ""personas"": [{{
-    ""nome"": ""[Nome]"",
-    ""perfil"": ""[descrição breve]"",
-    ""dores"": [""[dor 1]"", ""[dor 2]""]
+    ""perfil"": ""[papel, porte, responsabilidade]"",
+    ""dores"": [""[dor 1]"", ""[dor 2]""],
+    ""objetivos"": [""[objetivo 1]""]
   }}],
-  ""proposta_valor_inicial"": {{
-    ""frase_valor"": ""[1 frase]"",
-    ""diferenciais"": [""[diferencial 1]"", ""[diferencial 2]""]
+  ""proposta_valor"": {{
+    ""frase"": ""[1 sentença]"",
+    ""jobs_to_be_done"": [""[job 1]""]
+  }},
+  ""sintese"": {{
+    ""oportunidade"": ""[2-3 frases]"",
+    ""publico_prioritario"": ""[quem focar primeiro]"",
+    ""hipotese_monetizacao"": ""[modelo + preço sugerido]"",
+    ""incertezas"": [""[incerteza 1]"", ""[incerteza 2]""]
   }}
 }}
 ```

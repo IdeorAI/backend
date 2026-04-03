@@ -70,6 +70,16 @@ public class Project
     public string? TargetAudience { get; set; }
 
     /// <summary>
+    /// Região ou país alvo do projeto
+    /// </summary>
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Restrições ou premissas do projeto
+    /// </summary>
+    public string? Constraints { get; set; }
+
+    /// <summary>
     /// Data de criação do projeto
     /// </summary>
     public DateTime CreatedAt { get; set; }
