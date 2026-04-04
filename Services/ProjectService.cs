@@ -222,6 +222,23 @@ public class ProjectService : IProjectService
     // Helper para converter ProjectModel (Supabase) para Project (Entity)
     private Project MapToEntity(ProjectModel model)
     {
+        JsonDocument progressBreakdown;
+        try
+        {
+            if (model.ProgressBreakdown.HasValue && model.ProgressBreakdown.Value.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+            {
+                progressBreakdown = JsonDocument.Parse(model.ProgressBreakdown.Value.GetRawText());
+            }
+            else
+            {
+                progressBreakdown = JsonDocument.Parse("{}");
+            }
+        }
+        catch
+        {
+            progressBreakdown = JsonDocument.Parse("{}");
+        }
+
         var project = new Project
         {
             Id = Guid.Parse(model.Id),
@@ -230,9 +247,7 @@ public class ProjectService : IProjectService
             Description = model.Description,
             Score = model.Score,
             Valuation = model.Valuation,
-            ProgressBreakdown = model.ProgressBreakdown.HasValue
-                ? JsonDocument.Parse(model.ProgressBreakdown.Value.GetRawText())
-                : JsonDocument.Parse("{}"),
+            ProgressBreakdown = progressBreakdown,
             CurrentPhase = model.CurrentPhase,
             Category = model.Category,
             GeneratedOptions = model.GeneratedOptions,
