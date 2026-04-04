@@ -48,7 +48,8 @@ Log.Information("Supabase Client configured successfully. URL: {Url}", supabaseU
 
 var supabaseOptions = new Supabase.SupabaseOptions
 {
-    AutoConnectRealtime = false // Não precisamos de realtime para operações REST
+    AutoConnectRealtime = false,
+    AutoRefreshToken = true // Não precisamos de realtime para operações REST
 };
 
 builder.Services.AddSingleton(provider =>
