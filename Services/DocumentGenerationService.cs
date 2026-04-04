@@ -6,18 +6,60 @@ using System.Text.Json;
 namespace IdeorAI.Services;
 
 /// <summary>
-/// Serviço de geração de documentos via IA (Gemini)
+/// Serviço de geração de documentos via IA (Gemini ou OpenRouter)
 /// Implementação com Supabase Client
 /// </summary>
 public class DocumentGenerationService : IDocumentGenerationService
 {
     private readonly Supabase.Client _supabase;
-    private readonly GeminiApiClient _geminiClient;
+    private readonly GeminiApiClient? _geminiClient;
+    private readonly OpenRouterClient? _openRouterClient;
     private readonly IStageService _stageService;
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
+
+    public DocumentGenerationService(
+        Supabase.Client supabase,
+        IStageService stageService,
+        IProjectService projectService,
+        IStageSummaryService stageSummaryService,
+        ILogger<DocumentGenerationService> logger,
+        IConfiguration configuration,
+        GeminiApiClient? geminiClient = null,
+        OpenRouterClient? openRouterClient = null)
+    {
+        _supabase = supabase;
+        _geminiClient = geminiClient;
+        _openRouterClient = openRouterClient;
+        _stageService = stageService;
+        _projectService = projectService;
+        _stageSummaryService = stageSummaryService;
+        _logger = logger;
+        _configuration = configuration;
+    }
+
+    /// <summary>
+    /// Chama a API de IA configurada (OpenRouter ou Gemini)
+    /// </summary>
+    private async Task<string> CallAiApiAsync(string prompt, string stage = "")
+    {
+        // Prioridade: OpenRouter > Gemini
+        if (_openRouterClient != null)
+        {
+            _logger.LogInformation("[DocumentGeneration] Using OpenRouter for stage {Stage}", stage);
+            return await _openRouterClient.GenerateContentAsync(prompt);
+        }
+        
+        if (_geminiClient != null)
+        {
+            _logger.LogInformation("[DocumentGeneration] Using Gemini for stage {Stage}", stage);
+            return await _geminiClient.GenerateContentAsync(prompt, stage);
+        }
+        
+        throw new InvalidOperationException("Nenhum cliente de IA configurado");
+    }
 
     private const int MaxContextLength = 3500;
     private const int MaxInputLength = 500;
@@ -251,7 +293,7 @@ public class DocumentGenerationService : IDocumentGenerationService
             _logger.LogInformation("[DocumentGeneration] Chamando Gemini API para stage {Stage}...", stage);
             var startTime = DateTime.UtcNow;
 
-            generatedContent = await _geminiClient.GenerateContentAsync(prompt, stage);
+            generatedContent = await CallAiApiAsync(prompt, stage);
 
             var elapsed = DateTime.UtcNow - startTime;
             _logger.LogInformation("[DocumentGeneration] Gemini API respondeu com sucesso. Tempo: {ElapsedMs}ms, Conteúdo: {Length} caracteres",
@@ -398,7 +440,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         string generatedContent;
         try
         {
-            generatedContent = await _geminiClient.GenerateContentAsync(prompt);
+            generatedContent = await CallAiApiAsync(prompt);
         }
         catch (Exception ex)
         {
@@ -481,7 +523,7 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
         string refinedContent;
         try
         {
-            refinedContent = await _geminiClient.GenerateContentAsync(refinementPrompt);
+            refinedContent = await CallAiApiAsync(refinementPrompt);
         }
         catch (Exception ex)
         {

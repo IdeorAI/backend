@@ -151,27 +151,43 @@ builder.Services.AddLogging(logging =>
     });
 });
 
-// Configuração da chave Gemini
-var apiKey = builder.Configuration["Gemini:ApiKey"];
+// Configuração da chave Gemini (opcional se OpenRouter estiver configurado)
+var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
+var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
+var openRouterModel = builder.Configuration["OpenRouter:Model"] ?? "google/gemma-3-12b-it:free";
 
-if (string.IsNullOrEmpty(apiKey))
+if (string.IsNullOrEmpty(geminiApiKey) && string.IsNullOrEmpty(openRouterApiKey))
 {
-    throw new InvalidOperationException("Gemini API key is not configured. Please set the 'Gemini:ApiKey' configuration value.");
+    throw new InvalidOperationException("Nenhuma API de IA configurada. Configure 'Gemini:ApiKey' ou 'OpenRouter:ApiKey'.");
 }
 
 // Registrar métricas personalizadas
 builder.Services.AddSingleton<BackendMetrics>();
 
-
-// GeminiApiClient via HttpClientFactory (timeout + headers default)
-builder.Services.AddHttpClient<GeminiApiClient>(client =>
+// OpenRouter Client (prioritário se configurado)
+if (!string.IsNullOrEmpty(openRouterApiKey))
 {
-    client.Timeout = TimeSpan.FromSeconds(90); // Aumentado para 90s (prompts complexos demoram mais)
-    client.DefaultRequestHeaders.Accept.Clear();
-    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-})
-.ConfigurePrimaryHttpMessageHandler(() =>
+    Log.Information("OpenRouter configured with model {Model}", openRouterModel);
+    
+    builder.Services.AddHttpClient<OpenRouterClient>(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(90);
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", openRouterApiKey);
+        client.DefaultRequestHeaders.Add("HTTP-Referer", "https://ideorai.com");
+        client.DefaultRequestHeaders.Add("X-Title", "IdeorAI");
+    });
+}
+else
 {
+    // GeminiApiClient via HttpClientFactory (fallback)
+    builder.Services.AddHttpClient<GeminiApiClient>(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(90);
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    })
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
     var handler = new SocketsHttpHandler
     {
         // Configurações de pool de conexões
@@ -192,6 +208,7 @@ builder.Services.AddHttpClient<GeminiApiClient>(client =>
     };
     return handler;
 });
+} // Fim do else (Gemini fallback)
 
 // HttpClient adicional para PostgREST direto (se necessário)
 builder.Services.AddHttpClient("supabase", client =>
