@@ -70,6 +70,27 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         _logger.LogInformation("[DocumentGeneration] Stage válido. Título: {Title}", StageTitles[stage]);
 
+        // Validar que etapas anteriores foram completadas (bloqueio sequencial)
+        // etapa1 pode ser gerada sem dependências
+        if (stage.ToLower() != "etapa1")
+        {
+            var stageOrder = new[] { "etapa1", "etapa2", "etapa3", "etapa4", "etapa5" };
+            var currentStageIndex = Array.IndexOf(stageOrder, stage.ToLower());
+            
+            if (currentStageIndex > 0)
+            {
+                var previousStage = stageOrder[currentStageIndex - 1];
+                var previousSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+                var previousCompleted = previousSummaries.Any(s => s.Stage?.ToLower() == previousStage);
+                
+                if (!previousCompleted)
+                {
+                    _logger.LogWarning("[DocumentGeneration] Etapa anterior {PreviousStage} não completada. Bloqueando {Stage}", previousStage, stage);
+                    return null;
+                }
+            }
+        }
+
         // Log dos inputs recebidos (apenas em debug para não poluir produção)
         _logger.LogDebug("[DocumentGeneration] Inputs recebidos: {InputCount} campos", inputs.Count);
         foreach (var kvp in inputs)
