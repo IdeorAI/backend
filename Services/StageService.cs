@@ -64,7 +64,10 @@ public class StageService : IStageService
             Status = task.Status,
             EvaluationResult = task.EvaluationResult?.RootElement,
             CreatedAt = task.CreatedAt,
-            UpdatedAt = task.UpdatedAt
+            UpdatedAt = task.UpdatedAt,
+            // Navigation properties set to null to avoid schema cache issues
+            Project = null,
+            IaEvaluations = null
         };
 
         await _supabase

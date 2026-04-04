@@ -8,19 +8,16 @@ namespace IdeorAI.Client;
 /// </summary>
 public class OpenRouterClient
 {
-    private readonly HttpClient _httpClient;
-    private readonly string _apiKey;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _model;
     private readonly ILogger<OpenRouterClient> _logger;
 
     public OpenRouterClient(
-        HttpClient httpClient,
-        string apiKey,
+        IHttpClientFactory httpClientFactory,
         string model,
         ILogger<OpenRouterClient> logger)
     {
-        _httpClient = httpClient;
-        _apiKey = apiKey;
+        _httpClientFactory = httpClientFactory;
         _model = model;
         _logger = logger;
     }
@@ -28,6 +25,8 @@ public class OpenRouterClient
     public async Task<string> GenerateContentAsync(string prompt, CancellationToken ct = default)
     {
         _logger.LogInformation("[OpenRouter] Calling model {Model}", _model);
+
+        var client = _httpClientFactory.CreateClient("OpenRouter");
 
         var request = new
         {
@@ -40,7 +39,7 @@ public class OpenRouterClient
             max_tokens = 8000
         };
 
-        var response = await _httpClient.PostAsJsonAsync(
+        var response = await client.PostAsJsonAsync(
             "https://openrouter.ai/api/v1/chat/completions",
             request,
             ct);

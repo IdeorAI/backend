@@ -40,7 +40,12 @@ public class TaskModel : BaseModel
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; }
 
-    // Navigation properties
+    // Navigation properties (ignored by serializer)
+    [System.Text.Json.Serialization.JsonIgnore]
+    [Newtonsoft.Json.JsonIgnore]
     public ProjectModel? Project { get; set; }
+    
+    [System.Text.Json.Serialization.JsonIgnore]
+    [Newtonsoft.Json.JsonIgnore]
     public List<IaEvaluationModel>? IaEvaluations { get; set; }
 }

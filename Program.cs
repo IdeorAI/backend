@@ -169,13 +169,20 @@ if (!string.IsNullOrEmpty(openRouterApiKey))
 {
     Log.Information("OpenRouter configured with model {Model}", openRouterModel);
     
-    builder.Services.AddHttpClient<OpenRouterClient>(client =>
+    builder.Services.AddHttpClient("OpenRouter", client =>
     {
+        client.BaseAddress = new Uri("https://openrouter.ai/api/v1/");
         client.Timeout = TimeSpan.FromSeconds(90);
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", openRouterApiKey);
         client.DefaultRequestHeaders.Add("HTTP-Referer", "https://ideorai.com");
         client.DefaultRequestHeaders.Add("X-Title", "IdeorAI");
     });
+    
+    builder.Services.AddSingleton(provider => 
+        new OpenRouterClient(
+            provider.GetRequiredService<IHttpClientFactory>(),
+            openRouterModel,
+            provider.GetRequiredService<ILogger<OpenRouterClient>>()));
 }
 else
 {
@@ -233,8 +240,11 @@ builder.Services.AddHttpClient<HubSpotService>(client =>
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 });
 
-// Registrar serviços instrumentados
-builder.Services.AddSingleton<InstrumentedGeminiService>();
+// Registrar serviços instrumentados (somente se Gemini estiver configurado)
+if (!string.IsNullOrEmpty(geminiApiKey))
+{
+    builder.Services.AddSingleton<InstrumentedGeminiService>();
+}
 
 // CORS - Configuração ajustada para Vercel + Render
 const string FrontendCors = "FrontendCors";
