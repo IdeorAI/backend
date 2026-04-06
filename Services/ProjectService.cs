@@ -198,26 +198,30 @@ public class ProjectService : IProjectService
     }
 
     /// <summary>
-    /// Verifica se um usuário tem acesso a um projeto
-    /// </summary>
-    public async Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId)
+/// Verifica se um usuário tem acesso a um projeto
+/// </summary>
+public async Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId)
+{
+    try
     {
-        try
-        {
-            var response = await _supabase
-                .From<ProjectModel>()
-                .Where(x => x.Id == projectId.ToString() && x.OwnerId == userId.ToString())
-                .Get();
+        // Converter GUIDs para string antes da query (Supabase Postgrest não suporta .ToString() em LINQ)
+        var userIdStr = userId.ToString();
+        var projectIdStr = projectId.ToString();
+        
+        var response = await _supabase
+            .From<ProjectModel>()
+            .Where(x => x.Id == projectIdStr && x.OwnerId == userIdStr)
+            .Get();
 
-            return response.Models?.Any() ?? false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[ProjectService] Erro ao verificar acesso do usuário {UserId} ao projeto {ProjectId}", 
-                userId, projectId);
-            return false;
-        }
+        return response.Models?.Any() ?? false;
     }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "[ProjectService] Erro ao verificar acesso do usuário {UserId} ao projeto {ProjectId}", 
+            userId, projectId);
+        return false;
+    }
+}
 
     // Helper para converter ProjectModel (Supabase) para Project (Entity)
     private Project MapToEntity(ProjectModel model)
