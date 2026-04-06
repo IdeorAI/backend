@@ -36,10 +36,13 @@ public class StageSummaryService : IStageSummaryService
         {
             _logger.LogInformation("[StageSummary] UPSERT para project {ProjectId}, stage {Stage}", projectId, stage);
 
+            // Converter GUIDs para string antes da query
+            var projectIdStr = projectId.ToString();
+
             // Verificar se já existe
             var existing = await _supabase
                 .From<ProjectStageSummaryModel>()
-                .Where(x => x.ProjectId == projectId.ToString() && x.Stage == stage)
+                .Where(x => x.ProjectId == projectIdStr && x.Stage == stage)
                 .Single();
 
             if (existing != null)
@@ -62,7 +65,7 @@ public class StageSummaryService : IStageSummaryService
                 var newSummary = new ProjectStageSummaryModel
                 {
                     Id = Guid.NewGuid().ToString(),
-                    ProjectId = projectId.ToString(),
+                    ProjectId = projectIdStr,
                     UserId = userId.ToString(),
                     Stage = stage,
                     SummaryJson = summaryJson,
@@ -93,9 +96,12 @@ public class StageSummaryService : IStageSummaryService
     {
         try
         {
+            // Converter GUID para string antes da query
+            var projectIdStr = projectId.ToString();
+            
             var response = await _supabase
                 .From<ProjectStageSummaryModel>()
-                .Where(x => x.ProjectId == projectId.ToString())
+                .Where(x => x.ProjectId == projectIdStr)
                 .Get();
 
             // Ordenação em memória (LINQ) ao invés de na query
@@ -127,9 +133,12 @@ public class StageSummaryService : IStageSummaryService
             // Buscar todas as etapas anteriores
             var previousStages = StageOrder.Take(currentIndex).ToList();
 
+            // Converter GUID para string antes da query
+            var projectIdStr = projectId.ToString();
+
             var response = await _supabase
                 .From<ProjectStageSummaryModel>()
-                .Where(x => x.ProjectId == projectId.ToString())
+                .Where(x => x.ProjectId == projectIdStr)
                 .Get();
 
             // Filtrar só as anteriores e ordenar
@@ -171,12 +180,15 @@ public class StageSummaryService : IStageSummaryService
             _logger.LogInformation("[StageSummary] Deletando etapas posteriores a {Stage}: {Stages}", 
                 stage, string.Join(", ", subsequentStages));
 
+            // Converter GUID para string antes da query
+            var projectIdStr = projectId.ToString();
+
             // B-03: Batch delete ao invés de loop N+1
             if (subsequentStages.Any())
             {
                 await _supabase
                     .From<ProjectStageSummaryModel>()
-                    .Where(x => x.ProjectId == projectId.ToString() && subsequentStages.Contains(x.Stage))
+                    .Where(x => x.ProjectId == projectIdStr && subsequentStages.Contains(x.Stage))
                     .Delete();
             }
 
