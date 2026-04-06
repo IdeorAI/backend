@@ -48,63 +48,81 @@ Retorne um JSON com:
     }
 
     /// <summary>
-    /// Etapa 2: Pesquisa de Mercado (Resumido)
-    /// </summary>
-    public static string Etapa2PesquisaMercado(Dictionary<string, string> inputs)
-    {
-        var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+/// Etapa 2: Pesquisa de Mercado (Resumido)
+/// </summary>
+public static string Etapa2PesquisaMercado(Dictionary<string, string> inputs)
+{
+var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um analista de mercado. Faça uma análise resumida de mercado para esta ideia.
+var contextoSection = string.IsNullOrEmpty(contextoAcumulado) 
+? "" 
+: $@"
+## Contexto
+{contextoAcumulado}
+";
 
-**Ideia:** {ideia}
+return $@"Você é um analista de mercado especializado em startups early-stage.
+
+A partir da análise inicial abaixo, aprofunde o mapeamento competitivo. Foque no que é usado na prática, não em teoria. Cite soluções reais com nomes quando possível.
+{contextoSection}
+## Input do Usuário
+{ideia}
+
+## Roteiro
+
+A) Competidores e alternativas reais
+- 3-5 soluções específicas que o público usa hoje (nome + o que faz + limitação principal)
+- Incluir gambiarras e processos manuais se forem comuns
+
+B) Gaps exploráveis
+- 2-3 limitações concretas que nenhuma alternativa resolve bem
+- Para cada gap: quem sofre mais e por quê
+
+C) Posicionamento sugerido
+- 1 frase de posicionamento frente aos competidores
+- Principal vantagem competitiva a construir
+
+D) Métricas de mercado
+- 3-5 dados concretos: tamanho do segmento, ticket médio praticado, custo do problema para o cliente, frequência de uso das alternativas
+
+Formato: bullets concisos e diretos. Prefira dados específicos a afirmações genéricas.
 
 Retorne JSON:
 ```json
 {{
-  ""dimensionamento_mercado"": {{
-    ""tam"": {{
-      ""valor"": ""[valor estimado]"",
-      ""descricao"": ""[mercado total]""
-    }},
-    ""sam"": {{
-      ""valor"": ""[valor]"",
-      ""descricao"": ""[mercado alcançável]""
-    }},
-    ""som"": {{
-      ""valor"": ""[valor]"",
-      ""descricao"": ""[mercado realizável nos próximos 3 anos]""
-    }}
-  }},
-  ""analise_competitiva"": {{
-    ""concorrentes_diretos"": [
+  ""competidores_alternativas"": {{
+    ""solucoes_reais"": [
       {{
-        ""nome"": ""[Nome]"",
-        ""proposta"": ""[proposta]"",
-        ""preco"": ""[faixa de preço]"",
-        ""forças"": [""[força 1]""],
-        ""fraquezas"": [""[fraqueza 1]""]
+        ""nome"": ""[Nome da solução]"",
+        ""o_que_faz"": ""[Descrição breve]"",
+        ""limitacao_principal"": ""[Limitação]""
       }}
     ],
-    ""concorrentes_indiretos"": [""[alternativa 1]"", ""[alternativa 2]""],
-    ""vantagens_competitivas"": [""[vantagem 1]"", ""[vantagem 2]""]
+    ""processos_manuais"": [""[Gambiarra/processo manual comum]""]
   }},
-  ""tendencias"": [
+  ""gaps_exploraveis"": [
     {{
-      ""tendencia"": ""[nome]"",
-      ""impacto"": ""[alto/médio/baixo]"",
-      ""descricao"": ""[breve descrição]""
+      ""gap"": ""[Limitação não resolvida]"",
+      ""quem_sofre"": ""[Público que mais sofre]"",
+      ""por_que"": ""[Motivo]""
     }}
   ],
-  ""validacao_preco"": {{
-    ""faixa_preco_sugerida"": ""[R$ X - R$ Y]"",
-    ""modelo_monetizacao"": ""[modelo]"",
-    ""justificativa"": ""[justificativa breve]""
-  }}
+  ""posicionamento"": {{
+    ""frase"": ""[1 frase de posicionamento frente aos competidores]"",
+    ""vantagem_competitiva"": ""[Principal vantagem a construir]""
+  }},
+  ""metricas_mercado"": [
+    {{
+      ""dado"": ""[Nome da métrica]"",
+      ""valor"": ""[Valor/conteúdo]""
+    }}
+  ]
 }}
 ```
 
 **IMPORTANTE:** Retorne APENAS o JSON válido.";
-    }
+}
 
     /// <summary>
     /// Etapa 3: Proposta de Valor (Resumido)

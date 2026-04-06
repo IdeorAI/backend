@@ -185,6 +185,7 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         // Buscar contexto acumulado das etapas anteriores (se não for etapa 1)
         string contextPrompt = "";
+        string fullContext = "";
         if (stage.ToLower() != "etapa1")
         {
             try
@@ -195,7 +196,7 @@ public class DocumentGenerationService : IDocumentGenerationService
                 if (previousSummaries.Any())
                 {
                     var contextParts = previousSummaries.Select(s => $"[{s.Stage}] {s.SummaryText}");
-                    var fullContext = string.Join("\n", contextParts);
+                    fullContext = string.Join("\n", contextParts);
                     
                     // Limitar contexto a 3500 caracteres
                     if (fullContext.Length > MaxContextLength)
@@ -204,6 +205,9 @@ public class DocumentGenerationService : IDocumentGenerationService
                     }
                     
                     contextPrompt = $"\n\n## CONTEXTO DAS ETAPAS ANTERIORES:\n{fullContext}\n\nUse esse contexto para manter consistência com o que já foi definido.\n";
+                    
+                    // Adicionar contexto acumulado aos inputs para uso nos templates
+                    inputs["contexto_acumulado"] = fullContext;
                     
                     _logger.LogInformation("[DocumentGeneration] Contexto acumulado adicionado: {Length} caracteres de {Count} etapas anteriores",
                         contextPrompt.Length, previousSummaries.Count);
