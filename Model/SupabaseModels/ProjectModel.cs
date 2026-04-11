@@ -37,6 +37,12 @@ public class ProjectModel : BaseModel
     [Column("category")]
     public string? Category { get; set; }
 
+    [Column("is_public")]
+    public bool IsPublic { get; set; } = false;
+
+    [Column("slug")]
+    public string? Slug { get; set; }
+
     [Column("generated_options")]
     public string[]? GeneratedOptions { get; set; }
 

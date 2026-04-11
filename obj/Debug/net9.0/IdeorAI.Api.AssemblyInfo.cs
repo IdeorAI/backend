@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("IdeorAI.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+81143752884c012fffc261d029b1f585b63e9fce")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6400752b1687a15f978b72f17bb1aa508c26d704")]
 [assembly: System.Reflection.AssemblyProductAttribute("IdeorAI.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("IdeorAI.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
