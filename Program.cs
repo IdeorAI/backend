@@ -1,6 +1,7 @@
 using IdeorAI.Client;
 using IdeorAI.Services;
 using IdeorAI.Api.Services;
+using IdeorAI.Middleware;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Serilog;
@@ -347,6 +348,11 @@ if (app.Environment.IsDevelopment())
 
 // IMPORTANTE: CORS deve vir ANTES de UseAuthorization e MapControllers
 app.UseCors(FrontendCors);
+
+// Middleware JWT: valida Bearer token do Supabase e injeta x-user-id
+// Quando Auth:RequireJwt=true, rejeita requests sem JWT válido
+// Quando false (padrão), aceita x-user-id header diretamente (modo legado)
+app.UseMiddleware<JwtAuthMiddleware>();
 
 // Configurar endpoint Prometheus
 app.UseOpenTelemetryPrometheusScrapingEndpoint();

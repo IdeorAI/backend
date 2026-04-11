@@ -3639,31 +3639,24 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\aryha\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "C:\\Users\\aryha\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "G:\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
+      "projectUniqueName": "C:\\Users\\aryha\\Documents\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
       "projectName": "IdeorAI.Api",
-      "projectPath": "G:\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
+      "projectPath": "C:\\Users\\aryha\\Documents\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
       "packagesPath": "C:\\Users\\aryha\\.nuget\\packages\\",
-      "outputPath": "G:\\IdeorAI\\backend\\IdeorAI.Api\\obj\\",
+      "outputPath": "C:\\Users\\aryha\\Documents\\IdeorAI\\backend\\IdeorAI.Api\\obj\\",
       "projectStyle": "PackageReference",
-      "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-      ],
       "configFilePaths": [
-        "C:\\Users\\aryha\\AppData\\Roaming\\NuGet\\NuGet.Config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        "C:\\Users\\aryha\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net9.0"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
@@ -3784,7 +3777,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.302/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.308/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

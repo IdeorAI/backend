@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "ZY7EqGwvZXA=",
+  "dgSpecHash": "pz/xfWCSeFM=",
   "success": true,
-  "projectFilePath": "G:\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
+  "projectFilePath": "C:\\Users\\aryha\\Documents\\IdeorAI\\backend\\IdeorAI.Api\\IdeorAI.Api.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\aryha\\.nuget\\packages\\flurl\\4.0.0\\flurl.4.0.0.nupkg.sha512",
     "C:\\Users\\aryha\\.nuget\\packages\\flurl.http\\4.0.2\\flurl.http.4.0.2.nupkg.sha512",
