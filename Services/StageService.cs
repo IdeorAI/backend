@@ -79,6 +79,12 @@ public class StageService : IStageService
 
         _logger.LogInformation("Task {TaskId} created successfully", task.Id);
 
+        // Recalcular score quando task já vem com status evaluated (ex: DocumentGenerationService)
+        if (task.Status == "evaluated")
+        {
+            _ = _scoreService.CalculateAndPersistAsync(projectId.ToString());
+        }
+
         return task;
     }
 
@@ -177,6 +183,12 @@ public class StageService : IStageService
             .Update(model);
 
         _logger.LogInformation("Task {TaskId} updated successfully", taskId);
+
+        // Recalcular score quando task é atualizada com status evaluated (ex: regeneração)
+        if (task.Status == "evaluated")
+        {
+            _ = _scoreService.CalculateAndPersistAsync(task.ProjectId.ToString());
+        }
 
         return task;
     }
