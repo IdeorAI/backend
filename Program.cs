@@ -62,6 +62,7 @@ builder.Services.AddScoped<IStageService, StageService>();
 builder.Services.AddScoped<IDocumentGenerationService, DocumentGenerationService>();
 builder.Services.AddScoped<IPdfExportService, PdfExportService>();
 builder.Services.AddScoped<IStageSummaryService, StageSummaryService>();
+builder.Services.AddScoped<IScoreService, ScoreService>();
 
 // Configuração do OpenTelemetry
 var resourceBuilder = ResourceBuilder.CreateDefault()

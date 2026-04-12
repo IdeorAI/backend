@@ -12,6 +12,7 @@ public class StageService : IStageService
 {
     private readonly Supabase.Client _supabase;
     private readonly IProjectService _projectService;
+    private readonly IScoreService _scoreService;
     private readonly ILogger<StageService> _logger;
 
     // Definição das 7 etapas da Fase Projeto
@@ -29,10 +30,12 @@ public class StageService : IStageService
     public StageService(
         Supabase.Client supabase,
         IProjectService projectService,
+        IScoreService scoreService,
         ILogger<StageService> logger)
     {
         _supabase = supabase;
         _projectService = projectService;
+        _scoreService = scoreService;
         _logger = logger;
     }
 
@@ -190,10 +193,18 @@ public class StageService : IStageService
             return null;
         }
 
-        return await UpdateTaskAsync(taskId, userId, task =>
+        var updated = await UpdateTaskAsync(taskId, userId, task =>
         {
             task.Status = newStatus;
         });
+
+        // Recalcular score quando task é avaliada
+        if (updated != null && newStatus == "evaluated")
+        {
+            _ = _scoreService.CalculateAndPersistAsync(updated.ProjectId.ToString());
+        }
+
+        return updated;
     }
 
     public async Task<bool> CanAdvanceToNextPhaseAsync(Guid projectId, Guid userId)

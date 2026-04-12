@@ -14,13 +14,16 @@ namespace IdeorAI.Controllers;
 public class ProjectsController : ControllerBase
 {
     private readonly IProjectService _projectService;
+    private readonly IScoreService _scoreService;
     private readonly ILogger<ProjectsController> _logger;
 
     public ProjectsController(
         IProjectService projectService,
+        IScoreService scoreService,
         ILogger<ProjectsController> logger)
     {
         _projectService = projectService;
+        _scoreService = scoreService;
         _logger = logger;
     }
 
@@ -181,6 +184,27 @@ public class ProjectsController : ControllerBase
         }
 
         return Ok(MapToDto(updatedProject));
+    }
+
+    /// <summary>
+    /// Recalcula e persiste o score de um projeto com base nas tasks avaliadas
+    /// </summary>
+    [HttpPost("{id}/recalculate-score")]
+    public async Task<ActionResult<object>> RecalculateScore(
+        Guid id,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        _logger.LogInformation("Recalculating score for project {ProjectId}", id);
+
+        var project = await _projectService.GetByIdAsync(id, userId);
+        if (project == null)
+        {
+            return NotFound(new { error = "Project not found or access denied" });
+        }
+
+        var score = await _scoreService.CalculateAndPersistAsync(id.ToString());
+
+        return Ok(new { projectId = id, score });
     }
 
     /// <summary>
