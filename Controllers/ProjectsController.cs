@@ -15,15 +15,18 @@ public class ProjectsController : ControllerBase
 {
     private readonly IProjectService _projectService;
     private readonly IScoreService _scoreService;
+    private readonly IIvoService _ivoService;
     private readonly ILogger<ProjectsController> _logger;
 
     public ProjectsController(
         IProjectService projectService,
         IScoreService scoreService,
+        IIvoService ivoService,
         ILogger<ProjectsController> logger)
     {
         _projectService = projectService;
         _scoreService = scoreService;
+        _ivoService = ivoService;
         _logger = logger;
     }
 
@@ -205,6 +208,45 @@ public class ProjectsController : ControllerBase
         var score = await _scoreService.CalculateAndPersistAsync(id.ToString());
 
         return Ok(new { projectId = id, score });
+    }
+
+    /// <summary>
+    /// Retorna dados IVO do projeto sem recalcular
+    /// </summary>
+    [HttpGet("{id}/ivo")]
+    public async Task<ActionResult<IvoDataDto>> GetIvo(
+        Guid id,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        var project = await _projectService.GetByIdAsync(id, userId);
+        if (project == null)
+            return NotFound(new { error = "Project not found or access denied" });
+
+        var ivo = await _ivoService.GetIvoDataAsync(id.ToString());
+        if (ivo == null)
+            return NotFound(new { error = "IVO data not available" });
+
+        return Ok(ivo);
+    }
+
+    /// <summary>
+    /// Recalcula e persiste o IVO de um projeto (inclui nova avaliação de D)
+    /// </summary>
+    [HttpPost("{id}/recalculate-ivo")]
+    public async Task<ActionResult<IvoDataDto>> RecalculateIvo(
+        Guid id,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        _logger.LogInformation("Recalculating IVO for project {ProjectId}", id);
+
+        var project = await _projectService.GetByIdAsync(id, userId);
+        if (project == null)
+            return NotFound(new { error = "Project not found or access denied" });
+
+        await _ivoService.RecalculateAndPersistAsync(id.ToString());
+        var ivo = await _ivoService.GetIvoDataAsync(id.ToString());
+
+        return Ok(ivo);
     }
 
     /// <summary>

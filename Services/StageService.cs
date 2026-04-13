@@ -13,6 +13,7 @@ public class StageService : IStageService
     private readonly Supabase.Client _supabase;
     private readonly IProjectService _projectService;
     private readonly IScoreService _scoreService;
+    private readonly IIvoService _ivoService;
     private readonly ILogger<StageService> _logger;
 
     // Definição das 7 etapas da Fase Projeto
@@ -31,11 +32,13 @@ public class StageService : IStageService
         Supabase.Client supabase,
         IProjectService projectService,
         IScoreService scoreService,
+        IIvoService ivoService,
         ILogger<StageService> logger)
     {
         _supabase = supabase;
         _projectService = projectService;
         _scoreService = scoreService;
+        _ivoService = ivoService;
         _logger = logger;
     }
 
@@ -79,10 +82,27 @@ public class StageService : IStageService
 
         _logger.LogInformation("Task {TaskId} created successfully", task.Id);
 
-        // Recalcular score quando task já vem com status evaluated (ex: DocumentGenerationService)
+        // Recalcular score e IVO quando task já vem com status evaluated (ex: DocumentGenerationService)
         if (task.Status == "evaluated")
         {
             _ = _scoreService.CalculateAndPersistAsync(projectId.ToString());
+
+            // Fire-and-forget: avaliar variáveis IVO via Gemini para esta etapa
+            var stageNum = ParseStageNumber(task.Phase);
+            var content = task.Content ?? "";
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (stageNum.HasValue && !string.IsNullOrWhiteSpace(content))
+                        await _ivoService.EvaluateStageAsync(projectId.ToString(), stageNum.Value, content);
+                    await _ivoService.RecalculateAndPersistAsync(projectId.ToString());
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "IVO background evaluation failed for project {ProjectId}", projectId);
+                }
+            });
         }
 
         return task;
@@ -184,10 +204,26 @@ public class StageService : IStageService
 
         _logger.LogInformation("Task {TaskId} updated successfully", taskId);
 
-        // Recalcular score quando task é atualizada com status evaluated (ex: regeneração)
+        // Recalcular score e IVO quando task é atualizada com status evaluated (ex: regeneração)
         if (task.Status == "evaluated")
         {
             _ = _scoreService.CalculateAndPersistAsync(task.ProjectId.ToString());
+
+            var stageNum = ParseStageNumber(task.Phase);
+            var content = task.Content ?? "";
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (stageNum.HasValue && !string.IsNullOrWhiteSpace(content))
+                        await _ivoService.EvaluateStageAsync(task.ProjectId.ToString(), stageNum.Value, content);
+                    await _ivoService.RecalculateAndPersistAsync(task.ProjectId.ToString());
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "IVO background evaluation failed for project {ProjectId}", task.ProjectId);
+                }
+            });
         }
 
         return task;
@@ -299,6 +335,14 @@ public class StageService : IStageService
 
         // Todas completas
         return null;
+    }
+
+    // Helper: extrai número da etapa de "etapa1" → 1, "etapa2" → 2, etc.
+    private static int? ParseStageNumber(string? phase)
+    {
+        if (string.IsNullOrWhiteSpace(phase)) return null;
+        var digits = new string(phase.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var num) ? num : null;
     }
 
     // Helper para converter TaskModel (Supabase) para ProjectTask (Entity)

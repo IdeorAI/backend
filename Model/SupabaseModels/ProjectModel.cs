@@ -64,6 +64,31 @@ public class ProjectModel : BaseModel
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; }
 
+    // IVO — Ideor Value Opportunity Index
+    [Column("ivo_score_10")]
+    public decimal IvoScore10 { get; set; } = 1.0m;
+
+    [Column("ivo_o")]
+    public decimal IvoO { get; set; } = 5.0m;
+
+    [Column("ivo_m")]
+    public decimal IvoM { get; set; } = 5.0m;
+
+    [Column("ivo_v")]
+    public decimal IvoV { get; set; } = 5.0m;
+
+    [Column("ivo_e")]
+    public decimal IvoE { get; set; } = 5.0m;
+
+    [Column("ivo_t")]
+    public decimal IvoT { get; set; } = 5.0m;
+
+    [Column("ivo_d")]
+    public decimal IvoD { get; set; } = 1.0m;
+
+    [Column("ivo_index")]
+    public decimal IvoIndex { get; set; } = 100.0m;
+
     // Navigation properties (loaded via joins)
     public List<TaskModel>? Tasks { get; set; }
 }
