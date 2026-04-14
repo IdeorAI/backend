@@ -250,20 +250,29 @@ Retorne JSON:
     /// </summary>
     public static string Etapa3PropostaValor(Dictionary<string, string> inputs)
     {
-        var problemaValidado = inputs.GetValueOrDefault("problema", "[não fornecido]");
-        var personas = inputs.GetValueOrDefault("personas", "[não fornecido]");
+        var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um **especialista em Value Proposition Canvas**. Crie uma proposta de valor clara e convincente.
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $@"
+## Contexto das etapas anteriores
+{contextoAcumulado}
 
-## **Contexto**
-- **Problema validado:** {problemaValidado}
-- **Personas:** {personas}
+Use esse contexto — especialmente a análise competitiva e as dores mapeadas — para tornar a proposta de valor específica e diferenciada.
+";
 
-## **Objetivos**
-1. Definir jobs-to-be-done principais
-2. Aliviar dores específicas
-3. Criar ganhos tangíveis
-4. Formular proposta de valor única
+        return $@"Você é um **especialista em Value Proposition Canvas e posicionamento competitivo**. Construa uma proposta de valor concreta para a startup abaixo.
+
+## Ideia
+{ideia}
+{contextoSection}
+## Diretrizes
+- A proposta deve responder diretamente às **dores e gaps competitivos** identificados nas etapas anteriores.
+- Evite linguagem genérica. Seja específico sobre **o que a solução faz de diferente** e **para quem** especificamente.
+- Os `pain_relievers` devem endereçar as **limitações reais dos concorrentes** mapeados.
+- O `headline` deve ser direto, memorável e diferenciado — não use frases genéricas como ""solução inovadora"".
+- `metricas_sucesso` são indicadores mensuráveis que provam que a proposta de valor funcionou (ex: ""reduz tempo X em Y%"").
 
 Retorne JSON:
 
@@ -271,29 +280,33 @@ Retorne JSON:
 {{
   ""value_proposition_canvas"": {{
     ""customer_profile"": {{
-      ""customer_jobs"": [""[job 1]"", ""[job 2]"", ""[job 3]""],
-      ""pains"": [""[dor 1]"", ""[dor 2]"", ""[dor 3]""],
-      ""gains"": [""[ganho 1]"", ""[ganho 2]"", ""[ganho 3]""]
+      ""customer_jobs"": [""[tarefa funcional 1]"", ""[tarefa funcional 2]"", ""[job social 1]""],
+      ""pains"": [""[dor específica 1 — ligada a concorrente]"", ""[dor 2]"", ""[dor 3]""],
+      ""gains"": [""[ganho mensurável 1]"", ""[ganho 2]"", ""[ganho 3]""]
     }},
     ""value_map"": {{
-      ""products_services"": [""[produto/serviço 1]"", ""[produto/serviço 2]""],
-      ""pain_relievers"": [""[como alivia dor 1]"", ""[como alivia dor 2]""],
-      ""gain_creators"": [""[como cria ganho 1]"", ""[como cria ganho 2]""]
+      ""products_services"": [""[funcionalidade/produto 1]"", ""[funcionalidade/produto 2]""],
+      ""pain_relievers"": [""[como elimina dor 1 — específico]"", ""[como elimina dor 2]""],
+      ""gain_creators"": [""[como entrega ganho 1 — específico]"", ""[como entrega ganho 2]""]
     }}
   }},
   ""proposta_valor_final"": {{
-    ""headline"": ""[1 frase impactante]"",
-    ""subheadline"": ""[2-3 frases explicativas]"",
-    ""beneficios_chave"": [""[benefício 1]"", ""[benefício 2]"", ""[benefício 3]""],
-    ""diferenciais"": [""[diferencial 1]"", ""[diferencial 2]""]
+    ""headline"": ""[1 frase direta: para [quem], [produto] que [benefício único]]"",
+    ""subheadline"": ""[2-3 frases explicativas: o que é, para quem, resultado esperado]"",
+    ""beneficios_chave"": [""[benefício mensurável 1]"", ""[benefício 2]"", ""[benefício 3]""],
+    ""diferenciais"": [""[diferencial vs concorrente 1]"", ""[diferencial vs concorrente 2]""]
   }},
   ""posicionamento"": {{
-    ""para"": ""[público-alvo]"",
-    ""que"": ""[necessidade/oportunidade]"",
-    ""nosso_produto"": ""[categoria]"",
-    ""diferente_de"": ""[concorrentes]"",
-    ""porque"": ""[razão principal]""
-  }}
+    ""para"": ""[público-alvo específico]"",
+    ""que"": ""[necessidade/problema específico]"",
+    ""nosso_produto"": ""[categoria do produto]"",
+    ""diferente_de"": ""[principais concorrentes]"",
+    ""porque"": ""[razão principal de diferenciação]""
+  }},
+  ""metricas_sucesso"": [
+    {{""metrica"": ""[indicador mensurável]"", ""meta"": ""[valor alvo]"", ""prazo"": ""[período]""}},
+    {{""metrica"": ""[indicador 2]"", ""meta"": ""[valor]"", ""prazo"": ""[período]""}}
+  ]
 }}
 ```
 
@@ -305,53 +318,75 @@ Retorne JSON:
     /// </summary>
     public static string Etapa4ModeloNegocio(Dictionary<string, string> inputs)
     {
-        var propostaValor = inputs.GetValueOrDefault("proposta_valor", "[não fornecido]");
-        var segmento = inputs.GetValueOrDefault("segmento", "[não especificado]");
+        var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um **consultor de Business Model Canvas**. Estruture o modelo de negócio completo.
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $@"
+## Contexto das etapas anteriores
+{contextoAcumulado}
 
-## **Contexto**
-- **Proposta de Valor:** {propostaValor}
-- **Segmento:** {segmento}
+Use esse contexto — especialmente métricas de mercado, ticket médio e proposta de valor — para tornar as projeções financeiras realistas e ancoradas.
+";
 
-## **Objetivos**
-Preencher todos os 9 blocos do Business Model Canvas
+        return $@"Você é um **consultor de Business Model Canvas e modelagem financeira para startups**. Construa o modelo de negócio completo e projeções realistas.
+
+## Ideia
+{ideia}
+{contextoSection}
+## Diretrizes
+- Os **fluxos de receita** devem especificar valores realistas baseados no ticket médio do mercado identificado (se disponível no contexto).
+- A **projeção financeira** deve incluir premissas explícitas e números defensáveis — evite projeções excessivamente otimistas sem justificativa.
+- O `break_even_months` deve ser calculado a partir dos custos fixos e receita recorrente projetada.
+- Inclua **unit economics**: CAC estimado e LTV, pois são cruciais para a viabilidade.
 
 Retorne JSON:
 
 ```json
 {{
   ""business_model_canvas"": {{
-    ""segmentos_clientes"": [""[segmento 1]"", ""[segmento 2]""],
-    ""proposta_valor"": [""[proposta principal]""],
-    ""canais"": [""[canal 1]"", ""[canal 2]"", ""[canal 3]""],
-    ""relacionamento_clientes"": [""[tipo 1]"", ""[tipo 2]""],
+    ""segmentos_clientes"": [""[segmento principal]"", ""[segmento secundário]""],
+    ""proposta_valor"": [""[proposta central]""],
+    ""canais"": [""[canal de aquisição 1]"", ""[canal 2]"", ""[canal de entrega]""],
+    ""relacionamento_clientes"": [""[tipo de relacionamento 1]"", ""[tipo 2]""],
     ""fluxos_receita"": [
       {{
-        ""tipo"": ""[assinatura/pay-per-use/freemium]"",
-        ""valor"": ""[R$ X]"",
-        ""frequencia"": ""[mensal/anual]""
+        ""tipo"": ""[assinatura/pay-per-use/freemium/marketplace]"",
+        ""valor"": ""[R$ X/mês ou % ou por uso]"",
+        ""frequencia"": ""[mensal/anual/por transação]"",
+        ""justificativa"": ""[por que esse modelo para esse segmento]""
       }}
     ],
-    ""recursos_chave"": [""[recurso 1]"", ""[recurso 2]""],
-    ""atividades_chave"": [""[atividade 1]"", ""[atividade 2]""],
-    ""parcerias_chave"": [""[parceiro 1]"", ""[parceiro 2]""],
+    ""recursos_chave"": [""[recurso crítico 1]"", ""[recurso 2]""],
+    ""atividades_chave"": [""[atividade principal 1]"", ""[atividade 2]""],
+    ""parcerias_chave"": [""[parceiro estratégico 1]"", ""[parceiro 2]""],
     ""estrutura_custos"": [
       {{
-        ""categoria"": ""[categoria de custo]"",
+        ""categoria"": ""[categoria]"",
         ""valor_estimado"": ""[R$ X/mês]"",
         ""tipo"": ""[fixo/variável]""
       }}
     ]
+  }},
+  ""unit_economics"": {{
+    ""cac_estimado"": ""[R$ X por cliente adquirido]"",
+    ""ltv_estimado"": ""[R$ Y ao longo do relacionamento]"",
+    ""ltv_cac_ratio"": ""[N:1]"",
+    ""payback_periodo"": ""[N meses]""
   }},
   ""projecao_financeira_simplificada"": {{
     ""ano_1"": {{
       ""receita_mensal_media"": ""[R$ X]"",
       ""custos_mensais"": ""[R$ Y]"",
       ""margem_bruta"": ""[%]"",
-      ""break_even_months"": ""[N meses]""
+      ""break_even_months"": ""[N]""
     }},
-    ""premissas"": [""[premissa 1]"", ""[premissa 2]""]
+    ""premissas"": [
+      ""[premissa 1: ex. ticket médio de R$ X com base no mercado]"",
+      ""[premissa 2: ex. crescimento mensal de Y%]"",
+      ""[premissa 3: ex. custo de aquisição baseado em canal Z]""
+    ]
   }}
 }}
 ```
@@ -364,66 +399,77 @@ Retorne JSON:
     /// </summary>
     public static string Etapa5MVP(Dictionary<string, string> inputs)
     {
-        var propostaValor = inputs.GetValueOrDefault("proposta_valor", "[não fornecido]");
-        var recursos = inputs.GetValueOrDefault("recursos", "limitados");
+        var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um **Product Manager especializado em MVPs**. Defina o MVP mínimo para validar a ideia.
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $@"
+## Contexto das etapas anteriores
+{contextoAcumulado}
 
-## **Contexto**
-- **Proposta de Valor:** {propostaValor}
-- **Recursos disponíveis:** {recursos}
+Use esse contexto — especialmente as funcionalidades da proposta de valor e o modelo de negócio — para definir um MVP que valide as hipóteses mais críticas primeiro.
+";
 
-## **Objetivos**
-1. Definir funcionalidades core do MVP
-2. Priorizar features (MoSCoW)
-3. Estimar esforço de desenvolvimento
-4. Definir métricas de validação
+        return $@"Você é um **Product Manager especializado em MVPs Lean**. Defina o MVP mínimo viável que valida as hipóteses mais importantes com o menor esforço.
 
-Retorne JSON:
+## Ideia
+{ideia}
+{contextoSection}
+## Diretrizes
+- O MVP deve ser o menor escopo possível para validar a hipótese central de negócio.
+- `core_features` deve ter no máximo 3-5 funcionalidades — prefira menos e mais foco.
+- O `roadmap_3_meses` deve ser um array com 3 objetos (um por mês), cada um com objetivo claro e entregas concretas.
+- `custo_desenvolvimento` deve ser realista para o Brasil (freelancers ou agências nacionais).
+- As `metricas_validacao` devem ser métricas de negócio (conversão, retenção, receita), não apenas técnicas.
+
+Retorne JSON com exatamente esta estrutura:
 
 ```json
 {{
-  ""mvp_core"": {{
-    ""descricao"": ""[descrição do MVP em 2-3 frases]"",
-    ""funcionalidades_essenciais"": [
-      {{
-        ""feature"": ""[nome da feature]"",
-        ""descricao"": ""[o que faz]"",
-        ""prioridade"": ""Must Have"",
-        ""esforço"": ""[baixo/médio/alto]""
-      }}
-    ]
+  ""definicao_mvp"": {{
+    ""descricao"": ""[o que é o MVP em 2-3 frases]"",
+    ""hipotese_central"": ""[qual hipótese crítica este MVP valida]"",
+    ""core_features"": [""[feature essencial 1]"", ""[feature essencial 2]"", ""[feature essencial 3]""],
+    ""nice_to_have"": [""[feature para versão posterior 1]"", ""[feature 2]""],
+    ""justificativa"": ""[por que esse escopo é suficiente para validar]""
   }},
   ""priorizacao_moscow"": {{
-    ""must_have"": [""[feature 1]"", ""[feature 2]""],
-    ""should_have"": [""[feature 3]"", ""[feature 4]""],
-    ""could_have"": [""[feature 5]"", ""[feature 6]""],
-    ""wont_have"": [""[feature 7]"", ""[feature 8]""]
+    ""must_have"": [""[feature obrigatória 1]"", ""[feature 2]""],
+    ""should_have"": [""[feature importante 1]""],
+    ""could_have"": [""[feature desejável 1]""],
+    ""wont_have"": [""[feature para depois 1]""]
   }},
-  ""roadmap_desenvolvimento"": {{
-    ""sprint_1"": [""[task 1]"", ""[task 2]""],
-    ""sprint_2"": [""[task 3]"", ""[task 4]""],
-    ""sprint_3"": [""[task 5]"", ""[task 6]""],
-    ""duracao_estimada"": ""[X semanas]""
-  }},
-  ""stack_tecnologico_sugerido"": {{
-    ""frontend"": ""[tecnologia]"",
-    ""backend"": ""[tecnologia]"",
-    ""banco_dados"": ""[tecnologia]"",
-    ""infraestrutura"": ""[cloud provider]"",
-    ""justificativa"": ""[por que essa stack]""
+  ""roadmap_3_meses"": [
+    {{ ""mes"": 1, ""objetivo"": ""[objetivo do mês 1]"", ""entregas"": [""[entrega 1]"", ""[entrega 2]""] }},
+    {{ ""mes"": 2, ""objetivo"": ""[objetivo do mês 2]"", ""entregas"": [""[entrega 1]"", ""[entrega 2]""] }},
+    {{ ""mes"": 3, ""objetivo"": ""[objetivo do mês 3]"", ""entregas"": [""[entrega 1]"", ""[entrega 2]""] }}
+  ],
+  ""stack_tecnologica"": {{
+    ""frontend"": ""[tecnologia recomendada]"",
+    ""backend"": ""[tecnologia recomendada]"",
+    ""database"": ""[banco de dados]"",
+    ""infra"": ""[cloud/hosting]"",
+    ""justificativa"": ""[por que essa stack para esse contexto]""
   }},
   ""metricas_validacao"": [
-    {{
-      ""metrica"": ""[nome da métrica]"",
-      ""meta"": ""[valor alvo]"",
-      ""prazo"": ""[X semanas/meses]""
-    }}
-  ]
+    {{ ""metrica"": ""[nome da métrica de negócio]"", ""meta"": ""[valor alvo]"", ""motivo"": ""[por que essa métrica prova validação]"" }},
+    {{ ""metrica"": ""[métrica 2]"", ""meta"": ""[valor]"", ""motivo"": ""[motivo]"" }},
+    {{ ""metrica"": ""[métrica 3]"", ""meta"": ""[valor]"", ""motivo"": ""[motivo]"" }}
+  ],
+  ""custo_desenvolvimento"": {{
+    ""estimativa_total"": ""[R$ X]"",
+    ""tempo_estimado"": ""[N meses]"",
+    ""composicao"": [
+      {{ ""item"": ""[dev frontend]"", ""valor"": ""[R$ X]"" }},
+      {{ ""item"": ""[dev backend]"", ""valor"": ""[R$ Y]"" }},
+      {{ ""item"": ""[design/UX]"", ""valor"": ""[R$ Z]"" }}
+    ]
+  }}
 }}
 ```
 
-**IMPORTANTE:** Retorne APENAS o JSON válido.";
+**IMPORTANTE:** Retorne APENAS o JSON válido com exatamente as chaves especificadas.";
     }
 
     /// <summary>

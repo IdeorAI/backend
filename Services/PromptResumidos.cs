@@ -130,11 +130,16 @@ Retorne JSON:
     public static string Etapa3PropostaValor(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um especialista em Value Proposition. Crie uma proposta de valor clara.
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $"\n## Contexto\n{contextoAcumulado}\n";
+
+        return $@"Você é um especialista em Value Proposition Canvas. Crie uma proposta de valor específica e diferenciada, usando os gaps competitivos do contexto.
 
 **Ideia:** {ideia}
-
+{contextoSection}
 Retorne JSON:
 ```json
 {{
@@ -175,11 +180,16 @@ Retorne JSON:
     public static string Etapa4ModeloNegocio(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um consultor de Business Model Canvas. Estruture o modelo de negócio.
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $"\n## Contexto\n{contextoAcumulado}\n";
+
+        return $@"Você é um consultor de Business Model Canvas. Estruture o modelo de negócio usando as métricas de mercado e proposta de valor já definidas.
 
 **Ideia:** {ideia}
-
+{contextoSection}
 Retorne JSON:
 ```json
 {{
@@ -227,24 +237,25 @@ Retorne JSON:
     public static string Etapa5MVP(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Você é um Product Manager. Defina o MVP mínimo.
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $"\n## Contexto\n{contextoAcumulado}\n";
+
+        return $@"Você é um Product Manager especializado em MVPs Lean. Defina o MVP mínimo.
 
 **Ideia:** {ideia}
-
-Retorne JSON:
+{contextoSection}
+Retorne JSON com exatamente esta estrutura:
 ```json
 {{
-  ""mvp_core"": {{
-    ""descricao"": ""[descrição do MVP]"",
-    ""funcionalidades_essenciais"": [
-      {{
-        ""feature"": ""[nome]"",
-        ""descricao"": ""[o que faz]"",
-        ""prioridade"": ""Must Have"",
-        ""esforço"": ""[baixo/médio/alto]""
-      }}
-    ]
+  ""definicao_mvp"": {{
+    ""descricao"": ""[MVP em 2-3 frases]"",
+    ""hipotese_central"": ""[hipótese que o MVP valida]"",
+    ""core_features"": [""[feature 1]"", ""[feature 2]"", ""[feature 3]""],
+    ""nice_to_have"": [""[feature posterior 1]""],
+    ""justificativa"": ""[por que esse escopo]""
   }},
   ""priorizacao_moscow"": {{
     ""must_have"": [""[feature 1]"", ""[feature 2]""],
@@ -252,19 +263,25 @@ Retorne JSON:
     ""could_have"": [""[feature 4]""],
     ""wont_have"": [""[feature 5]""]
   }},
-  ""stack_tecnologico_sugerido"": {{
+  ""roadmap_3_meses"": [
+    {{ ""mes"": 1, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }},
+    {{ ""mes"": 2, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }},
+    {{ ""mes"": 3, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }}
+  ],
+  ""stack_tecnologica"": {{
     ""frontend"": ""[tecnologia]"",
     ""backend"": ""[tecnologia]"",
-    ""banco_dados"": ""[tecnologia]"",
-    ""justificativa"": ""[justificativa breve]""
+    ""database"": ""[banco]"",
+    ""infra"": ""[cloud]""
   }},
   ""metricas_validacao"": [
-    {{
-      ""metrica"": ""[métrica]"",
-      ""meta"": ""[valor]"",
-      ""prazo"": ""[prazo]""
-    }}
-  ]
+    {{ ""metrica"": ""[métrica de negócio]"", ""meta"": ""[valor]"", ""motivo"": ""[por que importa]"" }}
+  ],
+  ""custo_desenvolvimento"": {{
+    ""estimativa_total"": ""[R$ X]"",
+    ""tempo_estimado"": ""[N meses]"",
+    ""composicao"": [{{ ""item"": ""[item]"", ""valor"": ""[R$ Y]"" }}]
+  }}
 }}
 ```
 

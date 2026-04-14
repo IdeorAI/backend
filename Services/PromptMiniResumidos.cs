@@ -138,36 +138,45 @@ Retorne APENAS JSON válido.";
     public static string Etapa3PropostaValor(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Proposta de valor para: {ideia}
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $"\n## Contexto\n{contextoAcumulado}\n";
+
+        return $@"Especialista em Value Proposition Canvas. Construa a proposta de valor para a startup abaixo, usando os gaps competitivos e dores identificadas no contexto.
+
+**Ideia:** {ideia}
+{contextoSection}
+O `headline` deve ser específico e diferenciado — não genérico. Os `pain_relievers` devem endereçar limitações reais dos concorrentes.
 
 Retorne JSON:
 ```json
 {{
   ""value_proposition_canvas"": {{
     ""customer_profile"": {{
-      ""customer_jobs"": [""[job 1]"", ""[job 2]""],
-      ""pains"": [""[dor 1]"", ""[dor 2]""],
-      ""gains"": [""[ganho 1]"", ""[ganho 2]""]
+      ""customer_jobs"": [""[job funcional 1]"", ""[job 2]""],
+      ""pains"": [""[dor específica — ligada a concorrente]"", ""[dor 2]""],
+      ""gains"": [""[ganho mensurável 1]"", ""[ganho 2]""]
     }},
     ""value_map"": {{
-      ""products_services"": [""[produto 1]""],
-      ""pain_relievers"": [""[alivia dor 1]""],
-      ""gain_creators"": [""[cria ganho 1]""]
+      ""products_services"": [""[funcionalidade 1]"", ""[funcionalidade 2]""],
+      ""pain_relievers"": [""[como elimina dor 1 — específico]"", ""[alivia dor 2]""],
+      ""gain_creators"": [""[entrega ganho 1]"", ""[ganho 2]""]
     }}
   }},
   ""proposta_valor_final"": {{
-    ""headline"": ""[1 frase impactante]"",
-    ""subheadline"": ""[2-3 frases]"",
-    ""beneficios_chave"": [""[benefício 1]"", ""[benefício 2]""],
-    ""diferenciais"": [""[diferencial 1]"", ""[diferencial 2]""]
+    ""headline"": ""[1 frase: para [quem], [produto] que [benefício único]]"",
+    ""subheadline"": ""[2-3 frases: o quê, para quem, resultado]"",
+    ""beneficios_chave"": [""[benefício mensurável 1]"", ""[benefício 2]""],
+    ""diferenciais"": [""[diferencial vs concorrente 1]"", ""[diferencial 2]""]
   }},
   ""posicionamento"": {{
-    ""para"": ""[público]"",
-    ""que"": ""[necessidade]"",
+    ""para"": ""[público específico]"",
+    ""que"": ""[problema específico]"",
     ""nosso_produto"": ""[categoria]"",
     ""diferente_de"": ""[concorrentes]"",
-    ""porque"": ""[razão]""
+    ""porque"": ""[razão de diferenciação]""
   }}
 }}
 ```
@@ -181,8 +190,17 @@ Retorne APENAS JSON válido.";
     public static string Etapa4ModeloNegocio(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"Business Model Canvas para: {ideia}
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $"\n## Contexto\n{contextoAcumulado}\n";
+
+        return $@"Consultor de Business Model Canvas. Construa o modelo de negócio usando as métricas de mercado e proposta de valor já definidas.
+
+**Ideia:** {ideia}
+{contextoSection}
+Use o ticket médio e segmento do contexto para tornar as projeções realistas. Inclua unit economics (CAC e LTV).
 
 Retorne JSON:
 ```json
@@ -206,6 +224,12 @@ Retorne JSON:
       ""tipo"": ""fixo""
     }}]
   }},
+  ""unit_economics"": {{
+    ""cac_estimado"": ""[R$ X]"",
+    ""ltv_estimado"": ""[R$ Y]"",
+    ""ltv_cac_ratio"": ""[N:1]"",
+    ""payback_periodo"": ""[N meses]""
+  }},
   ""projecao_financeira_simplificada"": {{
     ""ano_1"": {{
       ""receita_mensal_media"": ""[R$ X]"",
@@ -213,7 +237,7 @@ Retorne JSON:
       ""margem_bruta"": ""[%]"",
       ""break_even_months"": ""[N]""
     }},
-    ""premissas"": [""[premissa 1]"", ""[premissa 2]""]
+    ""premissas"": [""[premissa baseada no mercado]"", ""[premissa 2]""]
   }}
 }}
 ```
