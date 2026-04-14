@@ -143,6 +143,49 @@ public class IvoService : IIvoService
         }
     }
 
+    public async Task ReevaluateAllStagesAsync(string projectId)
+    {
+        try
+        {
+            var tasks = await _supabase
+                .From<TaskModel>()
+                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+                .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "evaluated")
+                .Get();
+
+            // Agrupar tasks avaliadas por etapa e concatenar o conteúdo
+            var stageGroups = tasks.Models
+                .Where(t => !string.IsNullOrWhiteSpace(t.Content))
+                .GroupBy(t => ParseStageNumber(t.Phase))
+                .Where(g => g.Key.HasValue && StageVariables.ContainsKey(g.Key.Value))
+                .ToList();
+
+            if (!stageGroups.Any())
+            {
+                _logger.LogInformation("ReevaluateAllStages: no evaluated stages found for project {ProjectId}", projectId);
+                await RecalculateAndPersistAsync(projectId);
+                return;
+            }
+
+            foreach (var group in stageGroups)
+            {
+                var stageNumber = group.Key!.Value;
+                var combinedContent = string.Join("\n\n", group.Select(t => t.Content));
+                _logger.LogInformation("ReevaluateAllStages: evaluating stage {Stage} for project {ProjectId}", stageNumber, projectId);
+                await EvaluateStageAsync(projectId, stageNumber, combinedContent);
+            }
+
+            await RecalculateAndPersistAsync(projectId);
+
+            _logger.LogInformation("ReevaluateAllStages completed for project {ProjectId}: {StageCount} stages re-evaluated",
+                projectId, stageGroups.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in ReevaluateAllStagesAsync for project {ProjectId}", projectId);
+        }
+    }
+
     public async Task<IvoDataDto?> GetIvoDataAsync(string projectId)
     {
         try
@@ -154,10 +197,10 @@ public class IvoService : IIvoService
 
             if (project == null) return null;
 
-            // IVO é parcial se alguma variável O/M/V/E/T ainda está em 5.0 (valor padrão)
-            var isPartial = project.IvoO == 5.0m || project.IvoM == 5.0m ||
-                            project.IvoV == 5.0m || project.IvoE == 5.0m ||
-                            project.IvoT == 5.0m;
+            // IVO é parcial se alguma variável O/M/V/E/T ainda está em 1.0 (não avaliada pelo Gemini)
+            var isPartial = project.IvoO <= 1.0m || project.IvoM <= 1.0m ||
+                            project.IvoV <= 1.0m || project.IvoE <= 1.0m ||
+                            project.IvoT <= 1.0m;
 
             var ivoValue = ComputeRawIvo(
                 project.IvoScore10,
@@ -186,6 +229,14 @@ public class IvoService : IIvoService
 
     // ─── Private Helpers ───────────────────────────────────────────────────────
 
+    /// <summary>Extrai o número da etapa a partir do campo phase (ex: "etapa1" → 1)</summary>
+    private static int? ParseStageNumber(string? phase)
+    {
+        if (string.IsNullOrWhiteSpace(phase)) return null;
+        var digits = new string(phase.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var num) ? num : null;
+    }
+
     /// <summary>
     /// D = max(1.0, min(10.0, evaluatedStages * 1.5 + richStages * 0.3 + allCompleteBonus))
     /// </summary>
@@ -199,16 +250,18 @@ public class IvoService : IIvoService
         return Math.Max(1.0m, Math.Min(10.0m, d));
     }
 
+    // IVO = (Score10^1.3 × O × M × V × E × T × D) / 100_000
     private static double ComputeRawIvo(decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
         return Math.Pow((double)score10, 1.3) * (double)(o * m * v * e * t * d) / 100_000.0;
     }
 
+    // IVO Index (R$) = min(200 × (IVO + 1)^2.2, 1_000_000)
     private static decimal ComputeIvoIndex(decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
         var ivo = ComputeRawIvo(score10, o, m, v, e, t, d);
-        var ivoIndex = 100.0 * Math.Pow(ivo + 1.0, 2.2);
-        return (decimal)Math.Min(ivoIndex, 10_000_000.0);
+        var ivoIndex = 200.0 * Math.Pow(ivo + 1.0, 2.2);
+        return (decimal)Math.Min(ivoIndex, 1_000_000.0);
     }
 
     private string BuildEvaluationPrompt(int stageNumber, string[] variables, string content)

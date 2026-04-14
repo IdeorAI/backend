@@ -23,4 +23,7 @@ public class ProfileModel : BaseModel
 
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; }
+
+    [Column("is_admin")]
+    public bool IsAdmin { get; set; } = false;
 }

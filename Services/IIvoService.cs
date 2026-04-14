@@ -34,4 +34,10 @@ public interface IIvoService
     /// Retorna DTO com todos os dados IVO do projeto sem recalcular.
     /// </summary>
     Task<IvoDataDto?> GetIvoDataAsync(string projectId);
+
+    /// <summary>
+    /// Re-avalia todas as etapas já avaliadas do projeto via Gemini (para migração de dados existentes).
+    /// Útil para projetos criados antes da implementação do IVO.
+    /// </summary>
+    Task ReevaluateAllStagesAsync(string projectId);
 }

@@ -230,22 +230,27 @@ public class ProjectsController : ControllerBase
     }
 
     /// <summary>
-    /// Recalcula e persiste o IVO de um projeto (inclui nova avaliação de D)
+    /// Recalcula e persiste o IVO de um projeto.
+    /// Com ?full=true, re-avalia todas as etapas via Gemini (útil para migrar dados existentes).
     /// </summary>
     [HttpPost("{id}/recalculate-ivo")]
     public async Task<ActionResult<IvoDataDto>> RecalculateIvo(
         Guid id,
-        [FromHeader(Name = "x-user-id")] Guid userId)
+        [FromHeader(Name = "x-user-id")] Guid userId,
+        [FromQuery] bool full = false)
     {
-        _logger.LogInformation("Recalculating IVO for project {ProjectId}", id);
+        _logger.LogInformation("Recalculating IVO for project {ProjectId} (full={Full})", id, full);
 
         var project = await _projectService.GetByIdAsync(id, userId);
         if (project == null)
             return NotFound(new { error = "Project not found or access denied" });
 
-        await _ivoService.RecalculateAndPersistAsync(id.ToString());
-        var ivo = await _ivoService.GetIvoDataAsync(id.ToString());
+        if (full)
+            await _ivoService.ReevaluateAllStagesAsync(id.ToString());
+        else
+            await _ivoService.RecalculateAndPersistAsync(id.ToString());
 
+        var ivo = await _ivoService.GetIvoDataAsync(id.ToString());
         return Ok(ivo);
     }
 
