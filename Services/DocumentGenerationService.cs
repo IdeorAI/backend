@@ -342,7 +342,7 @@ public class DocumentGenerationService : IDocumentGenerationService
                 Id = Guid.NewGuid().ToString(),
                 TaskId = createdTask.Id.ToString(),
                 InputText = prompt,
-                OutputJson = TryParseJson(generatedContent).RootElement,
+                OutputJson = ExtractJsonString(generatedContent),
                 ModelUsed = "gemini-rotação-inteligente",
                 TokensUsed = EstimateTokens(prompt + generatedContent),
                 CreatedAt = DateTime.UtcNow
@@ -472,7 +472,7 @@ public class DocumentGenerationService : IDocumentGenerationService
                 Id = Guid.NewGuid().ToString(),
                 TaskId = taskId.ToString(),
                 InputText = prompt,
-                OutputJson = TryParseJson(generatedContent).RootElement,
+                OutputJson = ExtractJsonString(generatedContent),
                 ModelUsed = "gemini-rotação-inteligente",
                 TokensUsed = EstimateTokens(prompt + generatedContent),
                 CreatedAt = DateTime.UtcNow
@@ -554,7 +554,7 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
                 Id = Guid.NewGuid().ToString(),
                 TaskId = taskId.ToString(),
                 InputText = refinementPrompt,
-                OutputJson = TryParseJson(refinedContent).RootElement,
+                OutputJson = ExtractJsonString(refinedContent),
                 ModelUsed = "gemini-rotação-inteligente",
                 TokensUsed = EstimateTokens(refinementPrompt + refinedContent),
                 CreatedAt = DateTime.UtcNow
@@ -616,6 +616,25 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
     private int EstimateTokens(string text)
     {
         return text.Length / 4;
+    }
+
+    /// <summary>
+    /// Extrai o JSON do conteúdo gerado como string para armazenamento.
+    /// Evita usar JsonElement diretamente (incompatível com Newtonsoft.Json).
+    /// </summary>
+    private string ExtractJsonString(string content)
+    {
+        try
+        {
+            // Valida se é JSON válido — se for, retorna a string normalizada
+            using var doc = JsonDocument.Parse(content);
+            return content.Trim();
+        }
+        catch
+        {
+            // Conteúdo não é JSON — embute como campo "content" num objeto
+            return JsonSerializer.Serialize(new { content });
+        }
     }
 
     /// <summary>

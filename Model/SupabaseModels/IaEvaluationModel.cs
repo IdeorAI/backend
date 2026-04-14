@@ -1,6 +1,5 @@
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
-using System.Text.Json;
 
 namespace IdeorAI.Model.SupabaseModels;
 
@@ -19,8 +18,11 @@ public class IaEvaluationModel : BaseModel
     [Column("input_text")]
     public string? InputText { get; set; }
 
+    /// <summary>
+    /// Armazenado como string JSON para evitar problemas de serialização com Newtonsoft.Json
+    /// </summary>
     [Column("output_json")]
-    public JsonElement? OutputJson { get; set; }
+    public string? OutputJson { get; set; }
 
     [Column("model_used")]
     public string? ModelUsed { get; set; }
@@ -31,6 +33,8 @@ public class IaEvaluationModel : BaseModel
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
 
-    // Navigation property
+    // Navigation property — ignorado na serialização para evitar loop
+    [System.Text.Json.Serialization.JsonIgnore]
+    [Newtonsoft.Json.JsonIgnore]
     public TaskModel? Task { get; set; }
 }
