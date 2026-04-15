@@ -127,13 +127,26 @@ public class DocumentGenerationService : IDocumentGenerationService
         {
             var stageOrder = new[] { "etapa1", "etapa2", "etapa3", "etapa4", "etapa5" };
             var currentStageIndex = Array.IndexOf(stageOrder, stage.ToLower());
-            
+
             if (currentStageIndex > 0)
             {
                 var previousStage = stageOrder[currentStageIndex - 1];
-                var previousSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
-                var previousCompleted = previousSummaries.Any(s => s.Stage?.ToLower() == previousStage);
-                
+
+                // Verificar via tasks (sempre salvas) com fallback para stage_summaries
+                var projectTasks = await _stageService.GetProjectTasksAsync(projectId, userId);
+                var previousCompletedViaTask = projectTasks?.Any(t =>
+                    string.Equals(t.Phase, previousStage, StringComparison.OrdinalIgnoreCase) &&
+                    (t.Status == "evaluated" || t.Status == "submitted" || t.Status == "draft")) ?? false;
+
+                bool previousCompleted = previousCompletedViaTask;
+
+                if (!previousCompleted)
+                {
+                    // Fallback: verificar stage_summaries
+                    var previousSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+                    previousCompleted = previousSummaries.Any(s => s.Stage?.ToLower() == previousStage);
+                }
+
                 if (!previousCompleted)
                 {
                     _logger.LogWarning("[DocumentGeneration] Etapa anterior {PreviousStage} não completada. Bloqueando {Stage}", previousStage, stage);
