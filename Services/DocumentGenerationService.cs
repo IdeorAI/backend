@@ -85,24 +85,6 @@ public class DocumentGenerationService : IDocumentGenerationService
         { "etapa7", "Pitch Deck + Plano Executivo + Resumo" }
     };
 
-    public DocumentGenerationService(
-        Supabase.Client supabase,
-        GeminiApiClient geminiClient,
-        IStageService stageService,
-        IProjectService projectService,
-        IStageSummaryService stageSummaryService,
-        ILogger<DocumentGenerationService> logger,
-        IConfiguration configuration)
-    {
-        _supabase = supabase;
-        _geminiClient = geminiClient;
-        _stageService = stageService;
-        _projectService = projectService;
-        _stageSummaryService = stageSummaryService;
-        _logger = logger;
-        _configuration = configuration;
-    }
-
     public async Task<ProjectTask?> GenerateDocumentAsync(
         Guid projectId,
         Guid userId,
