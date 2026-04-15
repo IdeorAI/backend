@@ -24,6 +24,16 @@ public class OpenRouterClient
 
     public async Task<string> GenerateContentAsync(string prompt, CancellationToken ct = default)
     {
+        var result = await GenerateContentWithMetadataAsync(prompt, ct);
+        return result.Text;
+    }
+
+    /// <summary>
+    /// Retorna o texto gerado e os tokens reais de input/output da resposta OpenAI-compatible.
+    /// Resposta OpenRouter inclui: usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+    /// </summary>
+    public async Task<GeminiResult> GenerateContentWithMetadataAsync(string prompt, CancellationToken ct = default)
+    {
         _logger.LogInformation("[OpenRouter] Calling model {Model}", _model);
 
         var client = _httpClientFactory.CreateClient("OpenRouter");
@@ -55,7 +65,9 @@ public class OpenRouterClient
         if (json == null)
             throw new InvalidOperationException("OpenRouter returned empty response");
 
-        var content = json.RootElement
+        var root = json.RootElement;
+
+        var content = root
             .GetProperty("choices")[0]
             .GetProperty("message")
             .GetProperty("content")
@@ -64,7 +76,16 @@ public class OpenRouterClient
         if (string.IsNullOrEmpty(content))
             throw new InvalidOperationException("OpenRouter returned empty content");
 
-        _logger.LogInformation("[OpenRouter] Success. Content length: {Length}", content.Length);
-        return content;
+        // Extrair tokens reais do campo usage (OpenAI-compatible)
+        var inputTokens  = 0;
+        var outputTokens = 0;
+        if (root.TryGetProperty("usage", out var usage))
+        {
+            if (usage.TryGetProperty("prompt_tokens",     out var pt)) inputTokens  = pt.GetInt32();
+            if (usage.TryGetProperty("completion_tokens", out var ct2)) outputTokens = ct2.GetInt32();
+        }
+
+        _logger.LogInformation("[OpenRouter] Tokens — input: {In}, output: {Out}", inputTokens, outputTokens);
+        return new GeminiResult(content, inputTokens, outputTokens);
     }
 }

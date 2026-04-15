@@ -133,6 +133,30 @@ public class IvoService : IIvoService
                 .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
                 .Update(project);
 
+            // Gravar snapshot no histórico para o gráfico de evolução
+            try
+            {
+                var snapshot = new IvoHistoryModel
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    ProjectId = projectId,
+                    IvoIndex   = project.IvoIndex,
+                    IvoScore10 = project.IvoScore10,
+                    IvoO = project.IvoO,
+                    IvoM = project.IvoM,
+                    IvoV = project.IvoV,
+                    IvoE = project.IvoE,
+                    IvoT = project.IvoT,
+                    IvoD = project.IvoD,
+                    RecordedAt = DateTime.UtcNow,
+                };
+                await _supabase.From<IvoHistoryModel>().Insert(snapshot);
+            }
+            catch (Exception snapshotEx)
+            {
+                _logger.LogWarning(snapshotEx, "IVO snapshot insert failed for project {ProjectId} (non-blocking)", projectId);
+            }
+
             _logger.LogInformation(
                 "IVO recalculated for project {ProjectId}: D={D}, Index=R${Index:F0}",
                 projectId, project.IvoD, project.IvoIndex);

@@ -58,8 +58,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         if (_openRouterClient != null)
         {
             _logger.LogInformation("[DocumentGeneration] Using OpenRouter for stage {Stage}", stage);
-            var text = await _openRouterClient.GenerateContentAsync(prompt);
-            return new GeminiResult(text, InputTokens: 0, OutputTokens: 0);
+            return await _openRouterClient.GenerateContentWithMetadataAsync(prompt);
         }
 
         if (_geminiClient != null)
