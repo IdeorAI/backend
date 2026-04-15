@@ -631,8 +631,20 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
             
             if (!JsonSanitizer.TryValidateSchema(extractedJson, stage, out var jsonDoc, out var errorMessage))
             {
-                _logger.LogWarning("[DocumentGeneration] JSON inválido para {Stage}: {Error}", stage, errorMessage);
-                // Não falha a operação, apenas loga o erro
+                _logger.LogWarning("[DocumentGeneration] JSON inválido para {Stage}: {Error}. Salvando resumo fallback para não bloquear etapas subsequentes.", stage, errorMessage);
+
+                // Salvar resumo genérico para não bloquear verificação sequencial das próximas etapas
+                try
+                {
+                    var fallbackJson = JsonDocument.Parse(JsonSerializer.Serialize(new { content = generatedContent[..Math.Min(500, generatedContent.Length)] }));
+                    var fallbackText = $"Etapa {stage} concluída (formato de resposta não padrão).";
+                    await _stageSummaryService.UpsertAsync(projectId, userId, stage, fallbackJson.RootElement, fallbackText);
+                    _logger.LogInformation("[DocumentGeneration] Resumo fallback salvo para {Stage}", stage);
+                }
+                catch (Exception fbEx)
+                {
+                    _logger.LogError(fbEx, "[DocumentGeneration] Falha ao salvar resumo fallback para {Stage}", stage);
+                }
                 return;
             }
 
