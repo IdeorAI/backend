@@ -348,6 +348,39 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Global exception handler — garante CORS headers mesmo em 500
+// Deve ficar ANTES de UseCors para capturar exceções de qualquer middleware posterior
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "[GlobalExceptionHandler] Unhandled exception: {Type} - {Message}", ex.GetType().Name, ex.Message);
+
+        if (!context.Response.HasStarted)
+        {
+            // Adicionar CORS headers manualmente para que o browser veja o erro real
+            var origin = context.Request.Headers["Origin"].ToString();
+            if (!string.IsNullOrEmpty(origin))
+            {
+                context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+                context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+            }
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = "Internal server error",
+                type = ex.GetType().Name,
+                message = ex.Message
+            });
+        }
+    }
+});
+
 // IMPORTANTE: CORS deve vir ANTES de UseAuthorization e MapControllers
 app.UseCors(FrontendCors);
 
