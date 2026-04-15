@@ -52,10 +52,11 @@ public class AdminController : ControllerBase
         _logger.LogInformation("[Admin] Token stats requested by {UserId}, range {From} - {To}",
             userId, fromDate, toDate);
 
-        // Buscar avaliações no período com join em tasks e projects
+        // Buscar TODAS as avaliações no período (todos os usuários)
+        // Usando service role key — RLS bypassed completamente
         var evaluations = await _supabase
             .From<IaEvaluationModel>()
-            .Select("id, model_used, tokens_used, created_at, task_id")
+            .Select("id, user_id, model_used, tokens_used, created_at, task_id")
             .Filter("created_at", Supabase.Postgrest.Constants.Operator.GreaterThanOrEqual, fromDate.ToString("O"))
             .Filter("created_at", Supabase.Postgrest.Constants.Operator.LessThanOrEqual, toDate.ToString("O"))
             .Order("created_at", Supabase.Postgrest.Constants.Ordering.Descending)
@@ -69,14 +70,19 @@ public class AdminController : ControllerBase
             {
                 TotalCalls = 0,
                 TotalTokens = 0,
+                TotalInputTokens = 0,
+                TotalOutputTokens = 0,
                 AvgTokensPerCall = 0,
                 ByDay = [],
                 ByModel = [],
+                ByUser = [],
                 RecentCalls = []
             });
         }
 
         var totalTokens = rows.Sum(r => r.TokensUsed ?? 0);
+        var totalInputTokens  = rows.Sum(r => r.InputTokens ?? 0);
+        var totalOutputTokens = rows.Sum(r => r.OutputTokens ?? 0);
         var totalCalls = rows.Count;
 
         // Agrupamento por dia
@@ -103,15 +109,30 @@ public class AdminController : ControllerBase
             .OrderByDescending(m => m.Tokens)
             .ToList();
 
+        // Agrupamento por usuário
+        var byUser = rows
+            .GroupBy(r => r.UserId ?? "unknown")
+            .Select(g => new UserStats
+            {
+                UserId = g.Key,
+                Calls = g.Count(),
+                Tokens = g.Sum(r => r.TokensUsed ?? 0)
+            })
+            .OrderByDescending(u => u.Tokens)
+            .ToList();
+
         // 20 chamadas mais recentes
         var recentCalls = rows
             .Take(20)
             .Select(r => new RecentCall
             {
                 Id = r.Id,
+                UserId = r.UserId ?? "unknown",
                 TaskId = r.TaskId,
                 Model = r.ModelUsed ?? "unknown",
-                TokensUsed = r.TokensUsed ?? 0,
+                TokensUsed   = r.TokensUsed ?? 0,
+                InputTokens  = r.InputTokens ?? 0,
+                OutputTokens = r.OutputTokens ?? 0,
                 CreatedAt = r.CreatedAt
             })
             .ToList();
@@ -120,9 +141,12 @@ public class AdminController : ControllerBase
         {
             TotalCalls = totalCalls,
             TotalTokens = totalTokens,
+            TotalInputTokens = totalInputTokens,
+            TotalOutputTokens = totalOutputTokens,
             AvgTokensPerCall = totalCalls > 0 ? totalTokens / totalCalls : 0,
             ByDay = byDay,
             ByModel = byModel,
+            ByUser = byUser,
             RecentCalls = recentCalls
         });
     }
@@ -146,9 +170,12 @@ public record TokenStatsResponse
 {
     public int TotalCalls { get; init; }
     public int TotalTokens { get; init; }
+    public int TotalInputTokens { get; init; }
+    public int TotalOutputTokens { get; init; }
     public int AvgTokensPerCall { get; init; }
     public List<DayStats> ByDay { get; init; } = [];
     public List<ModelStats> ByModel { get; init; } = [];
+    public List<UserStats> ByUser { get; init; } = [];
     public List<RecentCall> RecentCalls { get; init; } = [];
 }
 
@@ -166,11 +193,21 @@ public record ModelStats
     public int Tokens { get; init; }
 }
 
+public record UserStats
+{
+    public string UserId { get; init; } = "";
+    public int Calls { get; init; }
+    public int Tokens { get; init; }
+}
+
 public record RecentCall
 {
     public string Id { get; init; } = "";
+    public string UserId { get; init; } = "";
     public string TaskId { get; init; } = "";
     public string Model { get; init; } = "";
     public int TokensUsed { get; init; }
+    public int InputTokens { get; init; }
+    public int OutputTokens { get; init; }
     public DateTime CreatedAt { get; init; }
 }

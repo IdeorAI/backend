@@ -1,9 +1,26 @@
+using Newtonsoft.Json;
+
 namespace IdeorAI.Model.ContentResponse
 {
     internal sealed class ContentResponse
     {
         public Candidate[] Candidates { get; set; }
         public PromptFeedback PromptFeedback { get; set; }
+
+        [JsonProperty("usageMetadata")]
+        public UsageMetadata? UsageMetadata { get; set; }
+    }
+
+    internal sealed class UsageMetadata
+    {
+        [JsonProperty("promptTokenCount")]
+        public int PromptTokenCount { get; set; }
+
+        [JsonProperty("candidatesTokenCount")]
+        public int CandidatesTokenCount { get; set; }
+
+        [JsonProperty("totalTokenCount")]
+        public int TotalTokenCount { get; set; }
     }
 
     internal sealed class PromptFeedback

@@ -166,6 +166,26 @@ namespace IdeorAI.Client
         }
 
         /// <summary>
+        /// Gera conteúdo usando o Gemini API com rotação inteligente de modelos,
+        /// retornando o texto e os tokens reais (input + output) da resposta.
+        /// </summary>
+        public async Task<GeminiResult> GenerateContentWithMetadataAsync(string prompt, string? stage = null, CancellationToken ct = default)
+        {
+            // Reutiliza a lógica interna e extrai metadata
+            var text = await GenerateContentAsync(prompt, stage, ct);
+            // O campo _lastUsageMetadata é preenchido durante a chamada interna
+            return new GeminiResult(
+                Text: text,
+                InputTokens: _lastInputTokens,
+                OutputTokens: _lastOutputTokens
+            );
+        }
+
+        // Campos temporários para capturar metadata da última chamada
+        private int _lastInputTokens;
+        private int _lastOutputTokens;
+
+        /// <summary>
         /// Gera conteúdo usando o Gemini API com rotação inteligente de modelos
         /// </summary>
         /// <param name="prompt">Prompt para geração</param>
@@ -221,6 +241,12 @@ namespace IdeorAI.Client
                         string jsonResponse = await response.Content.ReadAsStringAsync();
                         var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
                         _logger.LogInformation("[GeminiAPI] ✅ Sucesso com modelo {Model}", model);
+                        // Capturar tokens reais da resposta
+                        _lastInputTokens  = gemini?.UsageMetadata?.PromptTokenCount     ?? 0;
+                        _lastOutputTokens = gemini?.UsageMetadata?.CandidatesTokenCount ?? 0;
+                        if (_lastInputTokens > 0)
+                            _logger.LogInformation("[GeminiAPI] Tokens — input: {In}, output: {Out}, total: {Tot}",
+                                _lastInputTokens, _lastOutputTokens, gemini?.UsageMetadata?.TotalTokenCount);
                         return gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
                     }
                     else
@@ -275,6 +301,8 @@ namespace IdeorAI.Client
                             string jsonResponse = await response.Content.ReadAsStringAsync();
                             var gemini = JsonConvert.DeserializeObject<IdeorAI.Model.ContentResponse.ContentResponse>(jsonResponse);
                             _logger.LogInformation("[GeminiAPI] ✅ Sucesso com fallback model {Model}", fallbackModel);
+                            _lastInputTokens  = gemini?.UsageMetadata?.PromptTokenCount     ?? 0;
+                            _lastOutputTokens = gemini?.UsageMetadata?.CandidatesTokenCount ?? 0;
                             return gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
                         }
                         else
@@ -867,4 +895,12 @@ Total por ideia: máximo 400 caracteres.";
 
 
     }
+}
+
+/// <summary>
+/// Resultado de uma chamada ao Gemini com tokens reais separados por input/output.
+/// </summary>
+public record GeminiResult(string Text, int InputTokens, int OutputTokens)
+{
+    public int TotalTokens => InputTokens + OutputTokens;
 }

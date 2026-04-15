@@ -15,6 +15,9 @@ public class IaEvaluationModel : BaseModel
     [Column("task_id")]
     public string TaskId { get; set; } = null!;
 
+    [Column("user_id")]
+    public string? UserId { get; set; }
+
     [Column("input_text")]
     public string? InputText { get; set; }
 
@@ -29,6 +32,12 @@ public class IaEvaluationModel : BaseModel
 
     [Column("tokens_used")]
     public int? TokensUsed { get; set; }
+
+    [Column("input_tokens")]
+    public int? InputTokens { get; set; }
+
+    [Column("output_tokens")]
+    public int? OutputTokens { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
