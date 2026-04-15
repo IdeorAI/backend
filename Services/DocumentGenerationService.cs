@@ -132,19 +132,37 @@ public class DocumentGenerationService : IDocumentGenerationService
             {
                 var previousStage = stageOrder[currentStageIndex - 1];
 
-                // Verificar via tasks (sempre salvas) com fallback para stage_summaries
-                var projectTasks = await _stageService.GetProjectTasksAsync(projectId, userId);
-                var previousCompletedViaTask = projectTasks?.Any(t =>
-                    string.Equals(t.Phase, previousStage, StringComparison.OrdinalIgnoreCase) &&
-                    (t.Status == "evaluated" || t.Status == "submitted" || t.Status == "draft")) ?? false;
+                // Verificar via tasks diretamente no Supabase (sem validação de ownership — já feita acima)
+                bool previousCompleted = false;
+                try
+                {
+                    var taskCheck = await _supabase
+                        .From<TaskModel>()
+                        .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                        .Filter("phase", Supabase.Postgrest.Constants.Operator.Equals, previousStage)
+                        .Get();
 
-                bool previousCompleted = previousCompletedViaTask;
+                    previousCompleted = taskCheck.Models.Count > 0;
+                    _logger.LogInformation("[DocumentGeneration] Verificação sequencial: {PrevStage} tasks={Count}", previousStage, taskCheck.Models.Count);
+                }
+                catch (Exception seqEx)
+                {
+                    _logger.LogWarning(seqEx, "[DocumentGeneration] Falha ao verificar tasks para {Stage}, tentando stage_summaries", previousStage);
+                }
 
                 if (!previousCompleted)
                 {
                     // Fallback: verificar stage_summaries
-                    var previousSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
-                    previousCompleted = previousSummaries.Any(s => s.Stage?.ToLower() == previousStage);
+                    try
+                    {
+                        var previousSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+                        previousCompleted = previousSummaries.Any(s => s.Stage?.ToLower() == previousStage);
+                        _logger.LogInformation("[DocumentGeneration] Fallback stage_summaries: {PrevStage} found={Found}", previousStage, previousCompleted);
+                    }
+                    catch (Exception fbEx)
+                    {
+                        _logger.LogWarning(fbEx, "[DocumentGeneration] Falha ao verificar stage_summaries para {Stage}", previousStage);
+                    }
                 }
 
                 if (!previousCompleted)
