@@ -348,7 +348,17 @@ public class DocumentGenerationService : IDocumentGenerationService
             Status = "evaluated" // Já vem avaliado pela IA
         };
 
-        var createdTask = await _stageService.CreateTaskAsync(projectId, userId, task);
+        ProjectTask? createdTask;
+        try
+        {
+            createdTask = await _stageService.CreateTaskAsync(projectId, userId, task);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DocumentGeneration] Exceção ao criar task para project {ProjectId}, stage {Stage}. Tipo: {ExType}, Mensagem: {ExMsg}",
+                projectId, stage, ex.GetType().Name, ex.Message);
+            return null;
+        }
 
         if (createdTask == null)
         {

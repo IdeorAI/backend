@@ -67,6 +67,7 @@ public class JwtAuthMiddleware
             if (userId == null)
             {
                 _logger.LogWarning("JWT inválido ou expirado para path {Path}", path);
+                AddCorsHeaders(context);
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync("{\"error\":\"Token inválido ou expirado\"}");
@@ -81,6 +82,7 @@ public class JwtAuthMiddleware
         {
             // Se Auth:RequireJwt=true, rejeitar requests sem Bearer token
             _logger.LogWarning("Request sem Authorization header para path {Path} — rejeitado (RequireJwt=true)", path);
+            AddCorsHeaders(context);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"error\":\"Authorization header obrigatório\"}");
@@ -165,4 +167,14 @@ public class JwtAuthMiddleware
 
     private static bool IsPublicRoute(string path) =>
         PublicRoutes.Any(r => path.StartsWith(r, StringComparison.OrdinalIgnoreCase));
+
+    private static void AddCorsHeaders(HttpContext context)
+    {
+        var origin = context.Request.Headers["Origin"].ToString();
+        if (!string.IsNullOrEmpty(origin))
+        {
+            context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+        }
+    }
 }
