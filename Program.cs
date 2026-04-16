@@ -243,8 +243,9 @@ builder.Services.AddHttpClient<HubSpotService>(client =>
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 });
 
-// Registrar serviços instrumentados (somente se Gemini estiver configurado)
-if (!string.IsNullOrEmpty(geminiApiKey))
+// Registrar serviços instrumentados somente se Gemini for o cliente primário
+// (OpenRouter tem prioridade e não registra GeminiApiClient, então InstrumentedGeminiService não pode ser ativado)
+if (!string.IsNullOrEmpty(geminiApiKey) && string.IsNullOrEmpty(openRouterApiKey))
 {
     builder.Services.AddSingleton<InstrumentedGeminiService>();
 }

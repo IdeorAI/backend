@@ -1,3 +1,4 @@
+using IdeorAI.Client;
 using IdeorAI.Model.DTOs;
 using IdeorAI.Model.SupabaseModels;
 using System.Text.Json;
@@ -7,11 +8,13 @@ namespace IdeorAI.Services;
 /// <summary>
 /// Implementação do IvoService.
 /// Ver IIvoService para documentação completa da fórmula e variáveis.
+/// Suporta Gemini (InstrumentedGeminiService) ou OpenRouter — usa o que estiver disponível.
 /// </summary>
 public class IvoService : IIvoService
 {
     private readonly Supabase.Client _supabase;
-    private readonly InstrumentedGeminiService _gemini;
+    private readonly InstrumentedGeminiService? _gemini;
+    private readonly OpenRouterClient? _openRouterClient;
     private readonly ILogger<IvoService> _logger;
 
     // Variáveis IVO avaliadas por etapa
@@ -45,11 +48,13 @@ public class IvoService : IIvoService
 
     public IvoService(
         Supabase.Client supabase,
-        InstrumentedGeminiService gemini,
-        ILogger<IvoService> logger)
+        ILogger<IvoService> logger,
+        InstrumentedGeminiService? gemini = null,
+        OpenRouterClient? openRouterClient = null)
     {
         _supabase = supabase;
         _gemini = gemini;
+        _openRouterClient = openRouterClient;
         _logger = logger;
     }
 
@@ -317,10 +322,23 @@ public class IvoService : IIvoService
         // Valor padrão (neutro) para cada variável solicitada
         var defaults = variables.ToDictionary(v => v, _ => 5.0m);
 
+        // Se nenhum cliente de IA estiver disponível, retorna defaults sem erro
+        if (_gemini == null && _openRouterClient == null)
+        {
+            _logger.LogWarning("IVO: nenhum cliente de IA disponível para stage {Stage}, usando defaults", stageNumber);
+            return defaults;
+        }
+
         try
         {
             var prompt = BuildEvaluationPrompt(stageNumber, variables, content);
-            var response = await _gemini.GenerateContentAsync(prompt);
+
+            // OpenRouter tem prioridade; Gemini é fallback
+            string response;
+            if (_openRouterClient != null)
+                response = await _openRouterClient.GenerateContentAsync(prompt);
+            else
+                response = await _gemini!.GenerateContentAsync(prompt);
 
             // Limpar possível markdown code block
             var cleaned = response
