@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -23,26 +24,32 @@ public class JwtAuthMiddleware
     private readonly string _supabaseUrl;
     private readonly string _jwtSecret;
     private readonly bool _requireAuth;
+    private readonly IMemoryCache _cache;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     // Rotas que não precisam de autenticação
     private static readonly string[] PublicRoutes =
     [
         "/api/health",
-        "/metrics",
         "/swagger",
         "/api/leads"       // Lead capture é público
+        // /metrics removido — protegido em produção via JWT
     ];
 
     public JwtAuthMiddleware(
         RequestDelegate next,
         ILogger<JwtAuthMiddleware> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IMemoryCache cache,
+        IHttpClientFactory httpClientFactory)
     {
         _next = next;
         _logger = logger;
         _supabaseUrl = configuration["Supabase:Url"] ?? "";
         _jwtSecret = configuration["Supabase:JwtSecret"] ?? "";
         _requireAuth = configuration.GetValue<bool>("Auth:RequireJwt", false);
+        _cache = cache;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -143,10 +150,16 @@ public class JwtAuthMiddleware
     {
         var jwksUrl = $"{_supabaseUrl.TrimEnd('/')}/auth/v1/.well-known/jwks.json";
 
-        using var httpClient = new HttpClient();
-        httpClient.Timeout = TimeSpan.FromSeconds(5);
-        var jwksResponse = await httpClient.GetStringAsync(jwksUrl);
-        var jwks = new JsonWebKeySet(jwksResponse);
+        const string cacheKey = "supabase_jwks";
+        if (!_cache.TryGetValue(cacheKey, out JsonWebKeySet? jwks) || jwks == null)
+        {
+            var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            var jwksResponse = await httpClient.GetStringAsync(jwksUrl);
+            jwks = new JsonWebKeySet(jwksResponse);
+            _cache.Set(cacheKey, jwks, TimeSpan.FromMinutes(5));
+            _logger.LogDebug("JWKS carregado do Supabase e cacheado por 5 minutos");
+        }
 
         var handler = new JsonWebTokenHandler();
         var result = handler.ValidateToken(token, new TokenValidationParameters

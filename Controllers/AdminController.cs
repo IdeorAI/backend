@@ -1,5 +1,6 @@
 using IdeorAI.Model.SupabaseModels;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace IdeorAI.Controllers;
 
@@ -12,25 +13,33 @@ public class AdminController : ControllerBase
 {
     private readonly Supabase.Client _supabase;
     private readonly ILogger<AdminController> _logger;
+    private readonly IMemoryCache _cache;
 
-    public AdminController(Supabase.Client supabase, ILogger<AdminController> logger)
+    public AdminController(Supabase.Client supabase, ILogger<AdminController> logger, IMemoryCache cache)
     {
         _supabase = supabase;
         _logger = logger;
+        _cache = cache;
     }
 
     /// <summary>
-    /// Verifica se o usuário atual é admin
+    /// Verifica se o usuário atual é admin, com cache de 60 segundos por userId.
     /// </summary>
     private async Task<bool> IsAdminAsync(Guid userId)
     {
+        var cacheKey = $"is_admin_{userId}";
+        if (_cache.TryGetValue(cacheKey, out bool cachedResult))
+            return cachedResult;
+
         var result = await _supabase
             .From<ProfileModel>()
             .Select("is_admin")
             .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
             .Single();
 
-        return result?.IsAdmin ?? false;
+        var isAdmin = result?.IsAdmin ?? false;
+        _cache.Set(cacheKey, isAdmin, TimeSpan.FromSeconds(60));
+        return isAdmin;
     }
 
     /// <summary>

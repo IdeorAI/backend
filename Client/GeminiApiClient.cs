@@ -243,7 +243,7 @@ namespace IdeorAI.Client
                             _logger.LogInformation("[GeminiAPI] Tokens — input: {In}, output: {Out}, total: {Tot}",
                                 inputT, outputT, gemini?.UsageMetadata?.TotalTokenCount);
                         var text = gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
-                        return new GeminiResult(text, inputT, outputT);
+                        return new GeminiResult(text, inputT, outputT, model);
                     }
                     else
                     {
@@ -300,7 +300,7 @@ namespace IdeorAI.Client
                             var inputT  = gemini?.UsageMetadata?.PromptTokenCount     ?? 0;
                             var outputT = gemini?.UsageMetadata?.CandidatesTokenCount ?? 0;
                             var text = gemini?.Candidates?[0]?.Content?.Parts?[0]?.Text ?? string.Empty;
-                            return new GeminiResult(text, inputT, outputT);
+                            return new GeminiResult(text, inputT, outputT, fallbackModel);
                         }
                         else
                         {
@@ -897,7 +897,7 @@ Total por ideia: máximo 400 caracteres.";
 /// <summary>
 /// Resultado de uma chamada ao Gemini com tokens reais separados por input/output.
 /// </summary>
-public record GeminiResult(string Text, int InputTokens, int OutputTokens)
+public record GeminiResult(string Text, int InputTokens, int OutputTokens, string ModelName = "")
 {
     public int TotalTokens => InputTokens + OutputTokens;
 }

@@ -108,7 +108,6 @@ namespace IdeorAI.Api.Controllers
                 return StatusCode(500, new
                 {
                     error = "Falha ao gerar ideias",
-                    detail = ex.Message,
                     requestId = requestId
                 });
             }
@@ -171,7 +170,7 @@ namespace IdeorAI.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in suggest-and-save - RequestId: {RequestId}", requestId);
-                return StatusCode(500, new { error = "Falha ao gerar/salvar ideias.", detail = ex.Message, requestId });
+                return StatusCode(500, new { error = "Falha ao gerar/salvar ideias.", requestId });
             }
         }
 

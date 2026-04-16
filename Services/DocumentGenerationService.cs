@@ -315,6 +315,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Chamar Gemini API (com rotação inteligente de modelos baseada na etapa)
         string generatedContent;
         int aiInputTokens = 0, aiOutputTokens = 0;
+        string aiModelName = "";
         try
         {
             _logger.LogInformation("[DocumentGeneration] Chamando Gemini API para stage {Stage}...", stage);
@@ -324,6 +325,7 @@ public class DocumentGenerationService : IDocumentGenerationService
             generatedContent = aiResult.Text;
             aiInputTokens    = aiResult.InputTokens;
             aiOutputTokens   = aiResult.OutputTokens;
+            aiModelName      = aiResult.ModelName;
 
             var elapsed = DateTime.UtcNow - startTime;
             _logger.LogInformation("[DocumentGeneration] Gemini API respondeu. Tempo: {ElapsedMs}ms, Input: {In}t, Output: {Out}t",
@@ -384,7 +386,7 @@ public class DocumentGenerationService : IDocumentGenerationService
                 UserId = userId.ToString(),
                 InputText = prompt,
                 OutputJson = ExtractJsonString(generatedContent),
-                ModelUsed = "gemini-rotação-inteligente",
+                ModelUsed = !string.IsNullOrEmpty(aiModelName) ? aiModelName : "gemini-rotação-inteligente",
                 TokensUsed = totalTokens,
                 InputTokens = aiInputTokens > 0 ? aiInputTokens : null,
                 OutputTokens = aiOutputTokens > 0 ? aiOutputTokens : null,
@@ -487,12 +489,14 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Chamar Gemini API
         string generatedContent;
         int regenInputTokens = 0, regenOutputTokens = 0;
+        string regenModelName = "";
         try
         {
             var aiResult = await CallAiApiWithMetadataAsync(prompt);
             generatedContent   = aiResult.Text;
             regenInputTokens   = aiResult.InputTokens;
             regenOutputTokens  = aiResult.OutputTokens;
+            regenModelName     = aiResult.ModelName;
         }
         catch (Exception ex)
         {
@@ -526,7 +530,7 @@ public class DocumentGenerationService : IDocumentGenerationService
                 UserId = userId.ToString(),
                 InputText = prompt,
                 OutputJson = ExtractJsonString(generatedContent),
-                ModelUsed = "gemini-rotação-inteligente",
+                ModelUsed = !string.IsNullOrEmpty(regenModelName) ? regenModelName : "gemini-rotação-inteligente",
                 TokensUsed = regenTotal,
                 InputTokens = regenInputTokens > 0 ? regenInputTokens : null,
                 OutputTokens = regenOutputTokens > 0 ? regenOutputTokens : null,
@@ -581,12 +585,14 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
         // Chamar Gemini API
         string refinedContent;
         int refineInputTokens = 0, refineOutputTokens = 0;
+        string refineModelName = "";
         try
         {
             var aiResult = await CallAiApiWithMetadataAsync(refinementPrompt);
             refinedContent      = aiResult.Text;
             refineInputTokens   = aiResult.InputTokens;
             refineOutputTokens  = aiResult.OutputTokens;
+            refineModelName     = aiResult.ModelName;
         }
         catch (Exception ex)
         {
@@ -619,7 +625,7 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
                 UserId = userId.ToString(),
                 InputText = refinementPrompt,
                 OutputJson = ExtractJsonString(refinedContent),
-                ModelUsed = "gemini-rotação-inteligente",
+                ModelUsed = !string.IsNullOrEmpty(refineModelName) ? refineModelName : "gemini-rotação-inteligente",
                 TokensUsed = refineTotal,
                 InputTokens = refineInputTokens > 0 ? refineInputTokens : null,
                 OutputTokens = refineOutputTokens > 0 ? refineOutputTokens : null,

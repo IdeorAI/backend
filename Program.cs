@@ -34,6 +34,7 @@ builder.Host.UseSerilog();
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.AddMemoryCache();
 
 // ========== SUPABASE CLIENT ==========
 var supabaseUrl = builder.Configuration["Supabase:Url"];
@@ -209,12 +210,6 @@ else
 
         // Configurações de proxy
         UseProxy = true,
-
-        // Permitir certificados SSL inválidos em desenvolvimento (remover em produção)
-        SslOptions = new System.Net.Security.SslClientAuthenticationOptions
-        {
-            RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true
-        }
     };
     return handler;
 });
@@ -374,9 +369,7 @@ app.Use(async (context, next) =>
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsJsonAsync(new
             {
-                error = "Internal server error",
-                type = ex.GetType().Name,
-                message = ex.Message
+                error = "Internal server error"
             });
         }
     }

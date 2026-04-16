@@ -86,6 +86,6 @@ public class OpenRouterClient
         }
 
         _logger.LogInformation("[OpenRouter] Tokens — input: {In}, output: {Out}", inputTokens, outputTokens);
-        return new GeminiResult(content, inputTokens, outputTokens);
+        return new GeminiResult(content, inputTokens, outputTokens, _model);
     }
 }

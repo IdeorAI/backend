@@ -76,7 +76,7 @@ public class DocumentsController : ControllerBase
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
             ModelUsed = "rotação-inteligente",
-            TokensUsed = EstimateTokens(task.Content ?? ""),
+            TokensUsed = (task.Content ?? "").Length / 4,
             Status = task.Status,
             StageSaved = stageSaved
         });
@@ -141,7 +141,7 @@ public class DocumentsController : ControllerBase
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
             ModelUsed = "rotação-inteligente",
-            TokensUsed = EstimateTokens(task.Content ?? ""),
+            TokensUsed = (task.Content ?? "").Length / 4,
             Status = task.Status,
             StageSaved = stageSaved
         });
@@ -171,7 +171,7 @@ public class DocumentsController : ControllerBase
             Phase = task.Phase,
             GeneratedContent = task.Content ?? "",
             ModelUsed = "rotação-inteligente",  // Rotaciona entre gemini-2.0-flash-exp, gemini-2.5-flash, gemini-flash-1.5
-            TokensUsed = EstimateTokens(task.Content ?? ""),
+            TokensUsed = (task.Content ?? "").Length / 4,
             Status = task.Status
         });
     }
@@ -221,10 +221,6 @@ public class DocumentsController : ControllerBase
         return File(pdfBytes, "application/pdf", fileName);
     }
 
-    private int EstimateTokens(string text)
-    {
-        return text.Length / 4;
-    }
 }
 
 /// <summary>
