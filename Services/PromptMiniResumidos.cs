@@ -137,8 +137,14 @@ Retorne APENAS JSON válido.";
     /// </summary>
     public static string Etapa3PropostaValor(Dictionary<string, string> inputs)
     {
-        var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var problema = inputs.GetValueOrDefault("problema",
+            inputs.GetValueOrDefault("ideia", "[não fornecido]"));
+        var personas = inputs.GetValueOrDefault("personas", "");
         var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
+
+        var personasSection = string.IsNullOrEmpty(personas)
+            ? ""
+            : $"\n**Personas:** {personas}";
 
         var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
             ? ""
@@ -146,7 +152,7 @@ Retorne APENAS JSON válido.";
 
         return $@"Especialista em Value Proposition Canvas. Construa a proposta de valor para a startup abaixo, usando os gaps competitivos e dores identificadas no contexto.
 
-**Ideia:** {ideia}
+**Problema Validado:** {problema}{personasSection}
 {contextoSection}
 O `headline` deve ser específico e diferenciado — não genérico. Os `pain_relievers` devem endereçar limitações reais dos concorrentes.
 

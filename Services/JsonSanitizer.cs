@@ -93,7 +93,7 @@ public static class JsonSanitizer
         return stage?.ToLower() switch
         {
             "etapa1" => new[] { "declaracao_problema", "personas", "sintese" },
-            "etapa2" => new[] { "dimensionamento_mercado", "analise_competitiva", "tendencias", "validacao_preco" },
+            "etapa2" => new[] { "competidores_alternativas", "gaps_exploraveis", "posicionamento", "metricas_mercado" },
             "etapa3" => new[] { "value_proposition_canvas", "proposta_valor_final", "posicionamento" },
             "etapa4" => new[] { "business_model_canvas", "projecao_financeira_simplificada" },
             "etapa5" => new[] { "definicao_mvp", "roadmap_3_meses", "metricas_validacao", "stack_tecnologica", "custo_desenvolvimento" },
