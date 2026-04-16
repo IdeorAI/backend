@@ -56,7 +56,7 @@ public class AdminController : ControllerBase
         // Usando service role key — RLS bypassed completamente
         var evaluations = await _supabase
             .From<IaEvaluationModel>()
-            .Select("id, user_id, model_used, tokens_used, created_at, task_id")
+            .Select("id, user_id, model_used, tokens_used, input_tokens, output_tokens, created_at, task_id")
             .Filter("created_at", Supabase.Postgrest.Constants.Operator.GreaterThanOrEqual, fromDate.ToString("O"))
             .Filter("created_at", Supabase.Postgrest.Constants.Operator.LessThanOrEqual, toDate.ToString("O"))
             .Order("created_at", Supabase.Postgrest.Constants.Ordering.Descending)
