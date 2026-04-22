@@ -16,6 +16,7 @@ public class DocumentsController : ControllerBase
     private readonly IPdfExportService _pdfExportService;
     private readonly IStageService _stageService;
     private readonly IStageSummaryService _stageSummaryService;
+    private readonly IGoPivotService _goPivotService;
     private readonly ILogger<DocumentsController> _logger;
 
     public DocumentsController(
@@ -23,12 +24,14 @@ public class DocumentsController : ControllerBase
         IPdfExportService pdfExportService,
         IStageService stageService,
         IStageSummaryService stageSummaryService,
+        IGoPivotService goPivotService,
         ILogger<DocumentsController> logger)
     {
         _documentService = documentService;
         _pdfExportService = pdfExportService;
         _stageService = stageService;
         _stageSummaryService = stageSummaryService;
+        _goPivotService = goPivotService;
         _logger = logger;
     }
 
@@ -104,13 +107,20 @@ public class DocumentsController : ControllerBase
         // Invalidar etapas posteriores ao regenerar
         try
         {
-            _logger.LogInformation("Invalidando etapas posteriores a {Stage} no projeto {ProjectId}", 
+            _logger.LogInformation("Invalidando etapas posteriores a {Stage} no projeto {ProjectId}",
                 existingTask.Phase, existingTask.ProjectId);
             await _stageSummaryService.DeleteSubsequentStagesAsync(existingTask.ProjectId, existingTask.Phase);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Falha ao invalidar etapas posteriores (continuando)");
+        }
+
+        // Ao regenerar etapa2, invalidar avaliação GO/PIVOT existente
+        if (string.Equals(existingTask.Phase, "etapa2", StringComparison.OrdinalIgnoreCase))
+        {
+            try { await _goPivotService.InvalidateAsync(existingTask.ProjectId); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Falha ao invalidar GO/PIVOT (continuando)"); }
         }
 
         var task = await _documentService.RegenerateDocumentAsync(taskId, userId, newInputs);
