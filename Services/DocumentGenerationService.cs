@@ -393,11 +393,10 @@ public class DocumentGenerationService : IDocumentGenerationService
 
             var evaluationModel = new IaEvaluationModel
             {
-                Id = Guid.NewGuid().ToString(),
                 TaskId = createdTask.Id.ToString(),
                 UserId = userId.ToString(),
                 InputText = prompt,
-                OutputJson = ExtractJsonString(generatedContent),
+                OutputJson = null, // output_json é jsonb — omitido para evitar falha de deserialização na resposta
                 ModelUsed = !string.IsNullOrEmpty(aiModelName) ? aiModelName : "gemini-rotação-inteligente",
                 TokensUsed = totalTokens,
                 InputTokens = aiInputTokens > 0 ? aiInputTokens : null,
@@ -414,7 +413,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[DocumentGeneration] Falha ao salvar avaliação para task {TaskId}, mas documento foi gerado com sucesso", createdTask.Id);
+            _logger.LogError(ex, "[DocumentGeneration] ERRO ao salvar avaliação para task {TaskId}: {ExType} — {ExMsg}",
+                createdTask.Id, ex.GetType().Name, ex.Message);
         }
 
         _logger.LogInformation("[DocumentGeneration] ✅ Documento gerado com sucesso! TaskId: {TaskId}, Stage: {Stage}", createdTask.Id, stage);
@@ -537,11 +537,10 @@ public class DocumentGenerationService : IDocumentGenerationService
 
             var evaluationModel = new IaEvaluationModel
             {
-                Id = Guid.NewGuid().ToString(),
                 TaskId = taskId.ToString(),
                 UserId = userId.ToString(),
                 InputText = prompt,
-                OutputJson = ExtractJsonString(generatedContent),
+                OutputJson = null,
                 ModelUsed = !string.IsNullOrEmpty(regenModelName) ? regenModelName : "gemini-rotação-inteligente",
                 TokensUsed = regenTotal,
                 InputTokens = regenInputTokens > 0 ? regenInputTokens : null,
@@ -555,7 +554,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was regenerated successfully", taskId);
+            _logger.LogError(ex, "[DocumentGeneration] ERRO ao salvar avaliação (regen) para task {TaskId}: {ExType} — {ExMsg}",
+                taskId, ex.GetType().Name, ex.Message);
         }
 
         // Sanitizar JSON e salvar resumo da etapa
@@ -632,11 +632,10 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
 
             var evaluationModel = new IaEvaluationModel
             {
-                Id = Guid.NewGuid().ToString(),
                 TaskId = taskId.ToString(),
                 UserId = userId.ToString(),
                 InputText = refinementPrompt,
-                OutputJson = ExtractJsonString(refinedContent),
+                OutputJson = null,
                 ModelUsed = !string.IsNullOrEmpty(refineModelName) ? refineModelName : "gemini-rotação-inteligente",
                 TokensUsed = refineTotal,
                 InputTokens = refineInputTokens > 0 ? refineInputTokens : null,
@@ -650,7 +649,8 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to save evaluation for task {TaskId}, but document was refined successfully", taskId);
+            _logger.LogError(ex, "[DocumentGeneration] ERRO ao salvar avaliação (refine) para task {TaskId}: {ExType} — {ExMsg}",
+                taskId, ex.GetType().Name, ex.Message);
         }
 
         _logger.LogInformation("Document refined successfully for task {TaskId}", taskId);
