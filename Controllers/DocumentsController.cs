@@ -19,6 +19,7 @@ public class DocumentsController : ControllerBase
     private readonly IStageService _stageService;
     private readonly IStageSummaryService _stageSummaryService;
     private readonly IGoPivotService _goPivotService;
+    private readonly IProjectService _projectService;
     private readonly Supabase.Client _supabase;
     private readonly ILogger<DocumentsController> _logger;
 
@@ -28,6 +29,7 @@ public class DocumentsController : ControllerBase
         IStageService stageService,
         IStageSummaryService stageSummaryService,
         IGoPivotService goPivotService,
+        IProjectService projectService,
         Supabase.Client supabase,
         ILogger<DocumentsController> logger)
     {
@@ -36,24 +38,18 @@ public class DocumentsController : ControllerBase
         _stageService = stageService;
         _stageSummaryService = stageSummaryService;
         _goPivotService = goPivotService;
+        _projectService = projectService;
         _supabase = supabase;
         _logger = logger;
     }
 
-    // Retorna (ownerId, allowed). allowed=false se caller é viewer ou sem acesso.
-    // Tokens sempre debitados do ownerId (spec 007 T-019).
+    // Retorna (allowed, effectiveUserId). Tokens debitados do owner (spec 007 T-019).
     private async Task<(bool allowed, Guid effectiveUserId)> RequireEditorAsync(Guid projectId, Guid callerId)
     {
-        var projectRes = await _supabase
-            .From<ProjectModel>()
-            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
-            .Get();
-
-        var project = projectRes.Models.FirstOrDefault();
+        var project = await _projectService.GetByIdAsync(projectId, callerId);
         if (project == null) return (false, Guid.Empty);
 
-        var ownerId = Guid.Parse(project.OwnerId);
-        if (ownerId == callerId) return (true, callerId);
+        if (project.OwnerId == callerId) return (true, callerId);
 
         var memberRes = await _supabase
             .From<ProjectMemberModel>()
@@ -64,7 +60,7 @@ public class DocumentsController : ControllerBase
             .Get();
 
         if (memberRes.Models.Count > 0)
-            return (true, ownerId); // tokens debitados do owner
+            return (true, project.OwnerId); // tokens debitados do owner
 
         return (false, Guid.Empty);
     }
