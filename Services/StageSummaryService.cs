@@ -26,61 +26,59 @@ public class StageSummaryService : IStageSummaryService
     /// Cria ou atualiza o resumo de uma etapa (UPSERT)
     /// </summary>
     public async Task<ProjectStageSummaryModel?> UpsertAsync(
-        Guid projectId, 
-        Guid userId, 
-        string stage, 
-        JsonElement summaryJson, 
+        Guid projectId,
+        Guid userId,
+        string stage,
+        JsonElement summaryJson,
         string summaryText)
     {
         try
         {
             _logger.LogInformation("[StageSummary] UPSERT para project {ProjectId}, stage {Stage}", projectId, stage);
 
-            // Converter GUIDs para string antes da query
             var projectIdStr = projectId.ToString();
 
-            // Verificar se já existe
-            var existing = await _supabase
-                .From<ProjectStageSummaryModel>()
-                .Where(x => x.ProjectId == projectIdStr && x.Stage == stage)
-                .Single();
+            // Tentar buscar existente primeiro para reusar o mesmo Id (evita duplicatas)
+            ProjectStageSummaryModel? existing = null;
+            try
+            {
+                var check = await _supabase
+                    .From<ProjectStageSummaryModel>()
+                    .Where(x => x.ProjectId == projectIdStr && x.Stage == stage)
+                    .Get();
+                existing = check.Models?.FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[StageSummary] Não foi possível verificar existência de resumo para {Stage}; prosseguindo com insert", stage);
+            }
 
             if (existing != null)
             {
-                // Atualizar
                 existing.SummaryJson = summaryJson;
                 existing.SummaryText = summaryText;
                 existing.UpdatedAt = DateTime.UtcNow;
 
-                var response = await _supabase
-                    .From<ProjectStageSummaryModel>()
-                    .Update(existing);
-
+                var updated = await _supabase.From<ProjectStageSummaryModel>().Update(existing);
                 _logger.LogInformation("[StageSummary] Resumo atualizado para {Stage}", stage);
-                return response.Models?.FirstOrDefault();
+                return updated.Models?.FirstOrDefault();
             }
-            else
+
+            var newSummary = new ProjectStageSummaryModel
             {
-                // Criar novo
-                var newSummary = new ProjectStageSummaryModel
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    ProjectId = projectIdStr,
-                    UserId = userId.ToString(),
-                    Stage = stage,
-                    SummaryJson = summaryJson,
-                    SummaryText = summaryText,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
+                Id = Guid.NewGuid().ToString(),
+                ProjectId = projectIdStr,
+                UserId = userId.ToString(),
+                Stage = stage,
+                SummaryJson = summaryJson,
+                SummaryText = summaryText,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
 
-                var response = await _supabase
-                    .From<ProjectStageSummaryModel>()
-                    .Insert(newSummary);
-
-                _logger.LogInformation("[StageSummary] Resumo criado para {Stage}", stage);
-                return response.Models?.FirstOrDefault();
-            }
+            var inserted = await _supabase.From<ProjectStageSummaryModel>().Insert(newSummary);
+            _logger.LogInformation("[StageSummary] Resumo criado para {Stage}", stage);
+            return inserted.Models?.FirstOrDefault();
         }
         catch (Exception ex)
         {
