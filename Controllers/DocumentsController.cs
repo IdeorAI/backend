@@ -1,6 +1,8 @@
 using IdeorAI.Model.DTOs;
+using IdeorAI.Model.SupabaseModels;
 using IdeorAI.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Text.Json;
 
 namespace IdeorAI.Controllers;
@@ -17,6 +19,7 @@ public class DocumentsController : ControllerBase
     private readonly IStageService _stageService;
     private readonly IStageSummaryService _stageSummaryService;
     private readonly IGoPivotService _goPivotService;
+    private readonly Supabase.Client _supabase;
     private readonly ILogger<DocumentsController> _logger;
 
     public DocumentsController(
@@ -25,6 +28,7 @@ public class DocumentsController : ControllerBase
         IStageService stageService,
         IStageSummaryService stageSummaryService,
         IGoPivotService goPivotService,
+        Supabase.Client supabase,
         ILogger<DocumentsController> logger)
     {
         _documentService = documentService;
@@ -32,24 +36,59 @@ public class DocumentsController : ControllerBase
         _stageService = stageService;
         _stageSummaryService = stageSummaryService;
         _goPivotService = goPivotService;
+        _supabase = supabase;
         _logger = logger;
     }
 
+    // Retorna (ownerId, allowed). allowed=false se caller é viewer ou sem acesso.
+    // Tokens sempre debitados do ownerId (spec 007 T-019).
+    private async Task<(bool allowed, Guid effectiveUserId)> RequireEditorAsync(Guid projectId, Guid callerId)
+    {
+        var projectRes = await _supabase
+            .From<ProjectModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+            .Get();
+
+        var project = projectRes.Models.FirstOrDefault();
+        if (project == null) return (false, Guid.Empty);
+
+        var ownerId = Guid.Parse(project.OwnerId);
+        if (ownerId == callerId) return (true, callerId);
+
+        var memberRes = await _supabase
+            .From<ProjectMemberModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+            .Filter("user_id", Supabase.Postgrest.Constants.Operator.Equals, callerId.ToString())
+            .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "accepted")
+            .Filter("role", Supabase.Postgrest.Constants.Operator.Equals, "editor")
+            .Get();
+
+        if (memberRes.Models.Count > 0)
+            return (true, ownerId); // tokens debitados do owner
+
+        return (false, Guid.Empty);
+    }
+
     /// <summary>
-    /// Gera um documento para uma etapa específica
+    /// Gera um documento para uma etapa específica (requer role owner ou editor)
     /// </summary>
     [HttpPost("generate")]
+    [EnableRateLimiting("ai-generation")]
     public async Task<ActionResult<GenerateDocumentResponseDto>> GenerateDocument(
         Guid projectId,
         [FromBody] GenerateDocumentDto dto,
         [FromHeader(Name = "x-user-id")] Guid userId)
     {
-        _logger.LogInformation("Generating document for project {ProjectId}, stage {Stage}",
-            projectId, dto.Phase);
+        var (allowed, effectiveUserId) = await RequireEditorAsync(projectId, userId);
+        if (!allowed)
+            return StatusCode(403, new { error = "Você precisa ser editor ou dono do projeto para gerar documentos." });
+
+        _logger.LogInformation("Generating document for project {ProjectId}, stage {Stage} (effectiveUser={EffectiveUserId})",
+            projectId, dto.Phase, effectiveUserId);
 
         var task = await _documentService.GenerateDocumentAsync(
             projectId,
-            userId,
+            effectiveUserId,
             dto.Phase,
             dto.Inputs);
 

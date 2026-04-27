@@ -302,6 +302,31 @@ builder.Services.AddCors(opt =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Rate Limiting — 50 gerações IA por hora por usuário (configurável)
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("ai-generation", httpContext =>
+    {
+        var userId = httpContext.Request.Headers["x-user-id"].ToString();
+        if (string.IsNullOrEmpty(userId)) userId = "anonymous";
+        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(userId, _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromHours(1),
+            PermitLimit = builder.Configuration.GetValue<int>("RateLimiting:AiGenerationsPerHour", 50),
+            QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        });
+    });
+    options.RejectionStatusCode = 429;
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.Headers["Retry-After"] = "3600";
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "Limite de gerações IA atingido. Tente novamente em 1 hora." }, ct);
+    };
+});
+
 var app = builder.Build();
 
 // Middleware de Request ID
@@ -378,6 +403,30 @@ app.Use(async (context, next) =>
 
 // IMPORTANTE: CORS deve vir ANTES de UseAuthorization e MapControllers
 app.UseCors(FrontendCors);
+
+// Rate Limiter
+app.UseRateLimiter();
+
+// Proteger /metrics em produção com token secreto
+if (!app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/metrics"))
+        {
+            var expected = app.Configuration["Metrics:SecretToken"];
+            var provided = context.Request.Headers["X-Metrics-Token"].ToString();
+            if (string.IsNullOrEmpty(expected) || provided != expected)
+            {
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsJsonAsync(new { error = "Unauthorized" });
+                return;
+            }
+        }
+        await next();
+    });
+}
 
 // Middleware JWT: valida Bearer token do Supabase e injeta x-user-id
 // Quando Auth:RequireJwt=true, rejeita requests sem JWT válido

@@ -103,6 +103,17 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         _logger.LogInformation("[DocumentGeneration] Stage válido. Título: {Title}", StageTitles[stage]);
 
+        // Pré-carregar summaries uma única vez — evita N+1 (reusado na verificação sequencial e na detecção de etapa existente)
+        List<ProjectStageSummaryModel> cachedSummaries = [];
+        try
+        {
+            cachedSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DocumentGeneration] Falha ao pré-carregar stage summaries");
+        }
+
         // Validar que etapas anteriores foram completadas (bloqueio sequencial)
         // etapa1 pode ser gerada sem dependências
         if (stage.ToLower() != "etapa1")
@@ -137,7 +148,7 @@ public class DocumentGenerationService : IDocumentGenerationService
                     // Fallback: verificar stage_summaries
                     try
                     {
-                        var previousSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+                        var previousSummaries = cachedSummaries;
                         previousCompleted = previousSummaries.Any(s => s.Stage?.ToLower() == previousStage);
                         _logger.LogInformation("[DocumentGeneration] Fallback stage_summaries: {PrevStage} found={Found}", previousStage, previousCompleted);
                     }
@@ -167,7 +178,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         try
         {
             // Verificar se já existe um resumo para esta etapa
-            var existingSummaries = await _stageSummaryService.GetByProjectAsync(projectId);
+            var existingSummaries = cachedSummaries;
             var exists = existingSummaries.Any(s => s.Stage?.ToLower() == stage.ToLower());
             
             if (exists)

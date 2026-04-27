@@ -61,4 +61,5 @@ public class ProjectResponseDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public int TasksCount { get; set; }
+    public string MyRole { get; set; } = "owner"; // "owner" | "editor" | "viewer"
 }

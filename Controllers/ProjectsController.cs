@@ -1,5 +1,6 @@
 using IdeorAI.Model.DTOs;
 using IdeorAI.Model.Entities;
+using IdeorAI.Model.SupabaseModels;
 using IdeorAI.Services;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
@@ -16,22 +17,39 @@ public class ProjectsController : ControllerBase
     private readonly IProjectService _projectService;
     private readonly IScoreService _scoreService;
     private readonly IIvoService _ivoService;
+    private readonly Supabase.Client _supabase;
     private readonly ILogger<ProjectsController> _logger;
 
     public ProjectsController(
         IProjectService projectService,
         IScoreService scoreService,
         IIvoService ivoService,
+        Supabase.Client supabase,
         ILogger<ProjectsController> logger)
     {
         _projectService = projectService;
         _scoreService = scoreService;
         _ivoService = ivoService;
+        _supabase = supabase;
         _logger = logger;
     }
 
+    private async Task<string> GetMyRoleAsync(Guid projectId, Guid userId, Guid ownerId)
+    {
+        if (ownerId == userId) return "owner";
+
+        var res = await _supabase
+            .From<ProjectMemberModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+            .Filter("user_id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
+            .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "accepted")
+            .Get();
+
+        return res.Models.FirstOrDefault()?.Role ?? "viewer";
+    }
+
     /// <summary>
-    /// Obtém todos os projetos do usuário autenticado
+    /// Obtém todos os projetos do usuário autenticado (próprios + compartilhados com myRole)
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<List<ProjectResponseDto>>> GetUserProjects(
@@ -41,13 +59,28 @@ public class ProjectsController : ControllerBase
 
         var projects = await _projectService.GetUserProjectsAsync(userId);
 
-        var response = projects.Select(p => MapToDto(p)).ToList();
+        // Pré-buscar memberships aceitas para evitar N+1
+        var membershipsRes = await _supabase
+            .From<ProjectMemberModel>()
+            .Filter("user_id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
+            .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "accepted")
+            .Get();
+        var membershipMap = membershipsRes.Models
+            .ToDictionary(m => m.ProjectId, m => m.Role);
+
+        var response = projects.Select(p =>
+        {
+            string myRole = p.OwnerId == userId
+                ? "owner"
+                : membershipMap.GetValueOrDefault(p.Id.ToString(), "viewer");
+            return MapToDto(p, myRole);
+        }).ToList();
 
         return Ok(response);
     }
 
     /// <summary>
-    /// Obtém um projeto específico por ID
+    /// Obtém um projeto específico por ID (inclui myRole: owner | editor | viewer)
     /// </summary>
     [HttpGet("{id}")]
     public async Task<ActionResult<ProjectResponseDto>> GetProject(
@@ -63,7 +96,8 @@ public class ProjectsController : ControllerBase
             return NotFound(new { error = "Project not found or access denied" });
         }
 
-        return Ok(MapToDto(project));
+        var myRole = await GetMyRoleAsync(id, userId, project.OwnerId);
+        return Ok(MapToDto(project, myRole));
     }
 
     /// <summary>
@@ -128,7 +162,7 @@ public class ProjectsController : ControllerBase
     }
 
     /// <summary>
-    /// Deleta um projeto
+    /// Deleta um projeto (somente o owner pode deletar — membros recebem 403)
     /// </summary>
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteProject(
@@ -137,12 +171,17 @@ public class ProjectsController : ControllerBase
     {
         _logger.LogInformation("Deleting project {ProjectId} for user {UserId}", id, userId);
 
-        var success = await _projectService.DeleteAsync(id, userId);
-
-        if (!success)
-        {
+        // Verificar se o projeto existe e se o caller é o owner
+        var project = await _projectService.GetByIdAsync(id, userId);
+        if (project == null)
             return NotFound(new { error = "Project not found or access denied" });
-        }
+
+        if (project.OwnerId != userId)
+            return StatusCode(403, new { error = "Apenas o dono do projeto pode excluí-lo." });
+
+        var success = await _projectService.DeleteAsync(id, userId);
+        if (!success)
+            return NotFound(new { error = "Project not found or access denied" });
 
         return NoContent();
     }
@@ -254,10 +293,7 @@ public class ProjectsController : ControllerBase
         return Ok(ivo);
     }
 
-    /// <summary>
-    /// Mapeia entity para DTO
-    /// </summary>
-    private ProjectResponseDto MapToDto(Project project)
+    private ProjectResponseDto MapToDto(Project project, string myRole = "owner")
     {
         object? progressBreakdown = null;
         try
@@ -285,7 +321,8 @@ public class ProjectsController : ControllerBase
             ProgressBreakdown = progressBreakdown,
             CreatedAt = project.CreatedAt,
             UpdatedAt = project.UpdatedAt,
-            TasksCount = project.Tasks?.Count ?? 0
+            TasksCount = project.Tasks?.Count ?? 0,
+            MyRole = myRole
         };
     }
 }
