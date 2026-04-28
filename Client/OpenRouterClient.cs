@@ -85,31 +85,64 @@ public class OpenRouterClient
                     continue;
                 }
 
-                var json = await response.Content.ReadFromJsonAsync<JsonDocument>(ct);
-                if (json == null) continue;
+                string responseBody;
+                try
+                {
+                    responseBody = await response.Content.ReadAsStringAsync(ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[OpenRouter] Falha ao ler body do modelo {Model}", model);
+                    continue;
+                }
+
+                JsonDocument json;
+                try
+                {
+                    json = JsonDocument.Parse(responseBody);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[OpenRouter] Body não é JSON válido no modelo {Model}: {Preview}",
+                        model, responseBody[..Math.Min(200, responseBody.Length)]);
+                    continue;
+                }
 
                 var root = json.RootElement;
 
-                var contentEl = root
-                    .GetProperty("choices")[0]
-                    .GetProperty("message")
-                    .GetProperty("content");
-
                 string? content;
-                if (contentEl.ValueKind == JsonValueKind.Array)
+                try
                 {
-                    // Minimax retorna [{type:"text", text:"..."}]
-                    var sb = new System.Text.StringBuilder();
-                    foreach (var part in contentEl.EnumerateArray())
+                    var choices = root.GetProperty("choices");
+                    if (choices.GetArrayLength() == 0)
                     {
-                        if (part.TryGetProperty("text", out var textPart))
-                            sb.Append(textPart.GetString());
+                        _logger.LogWarning("[OpenRouter] Modelo {Model} retornou choices vazio", model);
+                        continue;
                     }
-                    content = sb.ToString();
+
+                    var contentEl = choices[0].GetProperty("message").GetProperty("content");
+
+                    if (contentEl.ValueKind == JsonValueKind.Array)
+                    {
+                        // Minimax retorna [{type:"text", text:"..."}]
+                        var sb = new System.Text.StringBuilder();
+                        foreach (var part in contentEl.EnumerateArray())
+                        {
+                            if (part.TryGetProperty("text", out var textPart))
+                                sb.Append(textPart.GetString());
+                        }
+                        content = sb.ToString();
+                    }
+                    else
+                    {
+                        content = contentEl.GetString();
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    content = contentEl.GetString();
+                    _logger.LogWarning(ex, "[OpenRouter] Estrutura de resposta inesperada no modelo {Model}: {Preview}",
+                        model, responseBody[..Math.Min(200, responseBody.Length)]);
+                    continue;
                 }
 
                 if (!string.IsNullOrEmpty(content))
