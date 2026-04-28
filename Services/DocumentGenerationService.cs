@@ -345,7 +345,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[DocumentGeneration] Erro ao chamar Gemini API para stage {Stage}. Tipo: {ExceptionType}, Mensagem: {Message}",
+            _logger.LogError(ex, "[DocumentGeneration] Erro ao chamar IA para stage {Stage}. Tipo: {ExceptionType}, Mensagem: {Message}",
                 stage, ex.GetType().Name, ex.Message);
             return null;
         }
