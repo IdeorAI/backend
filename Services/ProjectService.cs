@@ -1,5 +1,6 @@
 using IdeorAI.Model.Entities;
 using IdeorAI.Model.SupabaseModels;
+using Newtonsoft.Json.Linq;
 using System.Text.Json;
 
 namespace IdeorAI.Services;
@@ -95,7 +96,9 @@ public class ProjectService : IProjectService
             Description = project.Description,
             Score = project.Score,
             Valuation = project.Valuation,
-            ProgressBreakdown = project.ProgressBreakdown?.RootElement,
+            ProgressBreakdown = project.ProgressBreakdown != null
+                ? JToken.Parse(project.ProgressBreakdown.RootElement.GetRawText())
+                : null,
             CurrentPhase = project.CurrentPhase,
             Category = project.Category,
             GeneratedOptions = project.GeneratedOptions,
@@ -136,7 +139,9 @@ public class ProjectService : IProjectService
             Description = project.Description,
             Score = project.Score,
             Valuation = project.Valuation,
-            ProgressBreakdown = project.ProgressBreakdown?.RootElement,
+            ProgressBreakdown = project.ProgressBreakdown != null
+                ? JToken.Parse(project.ProgressBreakdown.RootElement.GetRawText())
+                : null,
             CurrentPhase = project.CurrentPhase,
             Category = project.Category,
             GeneratedOptions = project.GeneratedOptions,
@@ -229,14 +234,9 @@ public async Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId)
         JsonDocument progressBreakdown;
         try
         {
-            if (model.ProgressBreakdown.HasValue && model.ProgressBreakdown.Value.ValueKind != System.Text.Json.JsonValueKind.Undefined)
-            {
-                progressBreakdown = JsonDocument.Parse(model.ProgressBreakdown.Value.GetRawText());
-            }
-            else
-            {
-                progressBreakdown = JsonDocument.Parse("{}");
-            }
+            progressBreakdown = model.ProgressBreakdown != null
+                ? JsonDocument.Parse(model.ProgressBreakdown.ToString())
+                : JsonDocument.Parse("{}");
         }
         catch
         {
@@ -273,8 +273,8 @@ public async Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId)
                 Phase = t.Phase,
                 Content = t.Content,
                 Status = t.Status,
-                EvaluationResult = t.EvaluationResult.HasValue
-                    ? JsonDocument.Parse(t.EvaluationResult.Value.GetRawText())
+                EvaluationResult = t.EvaluationResult != null
+                    ? JsonDocument.Parse(t.EvaluationResult.ToString())
                     : null,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt

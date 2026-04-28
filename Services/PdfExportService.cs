@@ -133,8 +133,8 @@ public class PdfExportService : IPdfExportService
             Phase = model.Phase,
             Content = model.Content,
             Status = model.Status,
-            EvaluationResult = model.EvaluationResult.HasValue
-                ? JsonDocument.Parse(model.EvaluationResult.Value.GetRawText())
+            EvaluationResult = model.EvaluationResult != null
+                ? JsonDocument.Parse(model.EvaluationResult.ToString())
                 : null,
             CreatedAt = model.CreatedAt,
             UpdatedAt = model.UpdatedAt

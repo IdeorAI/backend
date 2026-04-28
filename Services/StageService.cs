@@ -1,5 +1,6 @@
 using IdeorAI.Model.Entities;
 using IdeorAI.Model.SupabaseModels;
+using Newtonsoft.Json.Linq;
 using System.Text.Json;
 
 namespace IdeorAI.Services;
@@ -68,7 +69,9 @@ public class StageService : IStageService
             Phase = task.Phase,
             Content = task.Content,
             Status = task.Status,
-            EvaluationResult = task.EvaluationResult?.RootElement,
+            EvaluationResult = task.EvaluationResult != null
+                ? JToken.Parse(task.EvaluationResult.RootElement.GetRawText())
+                : null,
             CreatedAt = task.CreatedAt,
             UpdatedAt = task.UpdatedAt,
             // Navigation properties set to null to avoid schema cache issues
@@ -193,7 +196,9 @@ public class StageService : IStageService
             Phase = task.Phase,
             Content = task.Content,
             Status = task.Status,
-            EvaluationResult = task.EvaluationResult?.RootElement,
+            EvaluationResult = task.EvaluationResult != null
+                ? JToken.Parse(task.EvaluationResult.RootElement.GetRawText())
+                : null,
             UpdatedAt = task.UpdatedAt
         };
 
@@ -357,8 +362,8 @@ public class StageService : IStageService
             Phase = model.Phase,
             Content = model.Content,
             Status = model.Status,
-            EvaluationResult = model.EvaluationResult.HasValue
-                ? JsonDocument.Parse(model.EvaluationResult.Value.GetRawText())
+            EvaluationResult = model.EvaluationResult != null
+                ? JsonDocument.Parse(model.EvaluationResult.ToString())
                 : null,
             CreatedAt = model.CreatedAt,
             UpdatedAt = model.UpdatedAt

@@ -1,6 +1,6 @@
+using Newtonsoft.Json.Linq;
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
-using System.Text.Json;
 
 namespace IdeorAI.Model.SupabaseModels;
 
@@ -29,7 +29,7 @@ public class ProjectModel : BaseModel
     public decimal Valuation { get; set; }
 
     [Column("progress_breakdown")]
-    public JsonElement? ProgressBreakdown { get; set; }
+    public JToken? ProgressBreakdown { get; set; }
 
     [Column("current_phase")]
     public string CurrentPhase { get; set; } = "fase1";

@@ -1,6 +1,6 @@
+using Newtonsoft.Json.Linq;
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
-using System.Text.Json;
 
 namespace IdeorAI.Model.SupabaseModels;
 
@@ -32,7 +32,7 @@ public class TaskModel : BaseModel
     public string Status { get; set; } = "draft";
 
     [Column("evaluation_result")]
-    public JsonElement? EvaluationResult { get; set; }
+    public JToken? EvaluationResult { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
