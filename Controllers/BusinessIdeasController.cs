@@ -94,6 +94,11 @@ namespace IdeorAI.Api.Controllers
 
                 return Ok(new GenerateIdeasResponse { Ideas = ideas, RequestId = requestId });
             }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("falharam"))
+            {
+                _logger.LogWarning(ex, "Rate limit OpenRouter (suggest-by-segment) - RequestId: {RequestId}", requestId);
+                return StatusCode(429, new { error = "Limite de requisições da IA atingido. Aguarde 1 minuto e tente novamente.", requestId });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating segment ideas - RequestId: {RequestId}", requestId);
@@ -137,6 +142,11 @@ namespace IdeorAI.Api.Controllers
             catch (OperationCanceledException)
             {
                 return StatusCode(499, new { error = "Cancelado pelo cliente.", requestId });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("falharam"))
+            {
+                _logger.LogWarning(ex, "Rate limit OpenRouter (suggest-and-save) - RequestId: {RequestId}", requestId);
+                return StatusCode(429, new { error = "Limite de requisições da IA atingido. Aguarde 1 minuto e tente novamente.", requestId });
             }
             catch (Exception ex)
             {
