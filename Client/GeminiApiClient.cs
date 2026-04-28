@@ -33,9 +33,9 @@ namespace IdeorAI.Client
         {
             _http = http;
 
-            // (fallback) timeout local — também deixaremos configurado no Program.cs
-            if (_http.Timeout == Timeout.InfiniteTimeSpan)
-                _http.Timeout = TimeSpan.FromSeconds(20);
+            // Timeout para chamadas LLM — mínimo 120s para prompts complexos (etapa3/5/7)
+            if (_http.Timeout == Timeout.InfiniteTimeSpan || _http.Timeout < TimeSpan.FromSeconds(120))
+                _http.Timeout = TimeSpan.FromSeconds(120);
 
             // Aceitar JSON por padrão
             _http.DefaultRequestHeaders.Accept.Clear();

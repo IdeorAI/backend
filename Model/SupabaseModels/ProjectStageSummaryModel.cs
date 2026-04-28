@@ -1,6 +1,6 @@
+using Newtonsoft.Json.Linq;
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
-using System.Text.Json;
 
 namespace IdeorAI.Model.SupabaseModels;
 
@@ -24,7 +24,7 @@ public class ProjectStageSummaryModel : BaseModel
     public string Stage { get; set; } = null!;
 
     [Column("summary_json")]
-    public JsonElement SummaryJson { get; set; }
+    public JToken? SummaryJson { get; set; }
 
     [Column("summary_text")]
     public string SummaryText { get; set; } = null!;

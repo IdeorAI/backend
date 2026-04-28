@@ -1,6 +1,5 @@
 using IdeorAI.Model.SupabaseModels;
-using Supabase;
-using Supabase.Postgrest;
+using Newtonsoft.Json.Linq;
 using System.Text.Json;
 
 namespace IdeorAI.Services;
@@ -55,7 +54,7 @@ public class StageSummaryService : IStageSummaryService
 
             if (existing != null)
             {
-                existing.SummaryJson = summaryJson;
+                existing.SummaryJson = JToken.Parse(summaryJson.GetRawText());
                 existing.SummaryText = summaryText;
                 existing.UpdatedAt = DateTime.UtcNow;
 
@@ -70,7 +69,7 @@ public class StageSummaryService : IStageSummaryService
                 ProjectId = projectIdStr,
                 UserId = userId.ToString(),
                 Stage = stage,
-                SummaryJson = summaryJson,
+                SummaryJson = JToken.Parse(summaryJson.GetRawText()),
                 SummaryText = summaryText,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
