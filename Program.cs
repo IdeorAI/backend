@@ -156,28 +156,56 @@ builder.Services.AddLogging(logging =>
     });
 });
 
-// Configuração da chave Gemini (opcional se OpenRouter estiver configurado)
-var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
+// Configuração das APIs de IA
+var geminiApiKey    = builder.Configuration["Gemini:ApiKey"];
 var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
+var deepSeekApiKey   = builder.Configuration["DeepSeek:ApiKey"];
 var openRouterModel  = builder.Configuration["OpenRouter:Model"]  ?? "google/gemma-3-12b-it:free";
 var openRouterModel2 = builder.Configuration["OpenRouter:Model2"];
 var openRouterModel3 = builder.Configuration["OpenRouter:Model3"];
 
-if (string.IsNullOrEmpty(geminiApiKey) && string.IsNullOrEmpty(openRouterApiKey))
+if (string.IsNullOrEmpty(geminiApiKey) &&
+    string.IsNullOrEmpty(openRouterApiKey) &&
+    string.IsNullOrEmpty(deepSeekApiKey))
 {
-    throw new InvalidOperationException("Nenhuma API de IA configurada. Configure 'Gemini:ApiKey' ou 'OpenRouter:ApiKey'.");
+    throw new InvalidOperationException(
+        "Nenhuma API de IA configurada. Configure 'DeepSeek:ApiKey', 'OpenRouter:ApiKey' ou 'Gemini:ApiKey'.");
 }
 
 // Registrar métricas personalizadas
 builder.Services.AddSingleton<BackendMetrics>();
 
-// OpenRouter Client (prioritário se configurado)
+// ── DeepSeek Client (priority 1 — primário) ──────────────────────────────────
+if (!string.IsNullOrEmpty(deepSeekApiKey))
+{
+    builder.Services.Configure<IdeorAI.Options.DeepSeekOptions>(opts =>
+    {
+        opts.ApiKey      = deepSeekApiKey;
+        opts.Model       = builder.Configuration["DeepSeek:Model"]       ?? "deepseek-chat";
+        opts.MaxTokens   = int.TryParse(builder.Configuration["DeepSeek:MaxTokens"],   out var mt) ? mt : 8000;
+        opts.Temperature = float.TryParse(builder.Configuration["DeepSeek:Temperature"], System.Globalization.NumberStyles.Float,
+                               System.Globalization.CultureInfo.InvariantCulture, out var temp) ? temp : 0.7f;
+        opts.TimeoutSeconds = int.TryParse(builder.Configuration["DeepSeek:TimeoutSeconds"], out var ts) ? ts : 60;
+    });
+
+    builder.Services.AddHttpClient("DeepSeek", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(60);
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", deepSeekApiKey);
+    });
+
+    builder.Services.AddSingleton<IdeorAI.Client.ILlmClient, IdeorAI.Client.DeepSeekClient>();
+    Log.Information("DeepSeek configurado como provider primário (priority=1)");
+}
+
+// ── OpenRouter Client (priority 2 — fallback) ─────────────────────────────────
 if (!string.IsNullOrEmpty(openRouterApiKey))
 {
     var models = new List<string> { openRouterModel };
     if (!string.IsNullOrWhiteSpace(openRouterModel2)) models.Add(openRouterModel2);
     if (!string.IsNullOrWhiteSpace(openRouterModel3)) models.Add(openRouterModel3);
-    Log.Information("OpenRouter configured with {Count} model(s): {Models}", models.Count, string.Join(", ", models));
+    Log.Information("OpenRouter configurado com {Count} modelo(s): {Models}", models.Count, string.Join(", ", models));
 
     builder.Services.AddHttpClient("OpenRouter", client =>
     {
@@ -194,9 +222,10 @@ if (!string.IsNullOrEmpty(openRouterApiKey))
             models,
             provider.GetRequiredService<ILogger<OpenRouterClient>>()));
 }
-else
+
+// GeminiApiClient (apenas se nem DeepSeek nem OpenRouter estiverem configurados)
+if (string.IsNullOrEmpty(deepSeekApiKey) && string.IsNullOrEmpty(openRouterApiKey) && !string.IsNullOrEmpty(geminiApiKey))
 {
-    // GeminiApiClient via HttpClientFactory (fallback)
     builder.Services.AddHttpClient<GeminiApiClient>(client =>
     {
         client.Timeout = TimeSpan.FromSeconds(90);
@@ -205,21 +234,19 @@ else
     })
     .ConfigurePrimaryHttpMessageHandler(() =>
     {
-    var handler = new SocketsHttpHandler
-    {
-        // Configurações de pool de conexões
-        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5),
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            UseProxy = true,
+        };
+        return handler;
+    });
+}
 
-        // Configurações de DNS
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-
-        // Configurações de proxy
-        UseProxy = true,
-    };
-    return handler;
-});
-} // Fim do else (Gemini fallback)
+// ── LlmFallbackService — orquestra todos os ILlmClient registrados ────────────
+builder.Services.AddSingleton<IdeorAI.Services.ILlmFallbackService, IdeorAI.Services.LlmFallbackService>();
 
 // HttpClient adicional para PostgREST direto (se necessário)
 builder.Services.AddHttpClient("supabase", client =>
