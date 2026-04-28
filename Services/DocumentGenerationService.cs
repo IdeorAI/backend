@@ -193,23 +193,33 @@ public class DocumentGenerationService : IDocumentGenerationService
             _logger.LogWarning(ex, "[DocumentGeneration] Falha ao invalidar etapas posteriores (continuando)");
         }
 
-        // Enriquecer inputs com dados do projeto (Region e Constraints)
+        // Enriquecer inputs com dados do projeto (evita perguntar novamente o que já foi coletado na criação da ideia)
         try
         {
             var project = await _projectService.GetByIdAsync(projectId, userId);
             if (project != null)
             {
-                if (!string.IsNullOrEmpty(project.Region))
+                // Campos já coletados na criação — injetados apenas se o input não veio do frontend
+                if (!string.IsNullOrEmpty(project.Region) && !inputs.ContainsKey("regiao"))
                     inputs["regiao"] = SanitizeInput(project.Region);
-                
-                if (!string.IsNullOrEmpty(project.Constraints))
+
+                if (!string.IsNullOrEmpty(project.Constraints) && !inputs.ContainsKey("restricoes"))
                     inputs["restricoes"] = SanitizeInput(project.Constraints);
 
-                // Se não tiver ideia nos inputs, tenta pegar da descrição
+                if (!string.IsNullOrEmpty(project.Category) && !inputs.ContainsKey("categoria"))
+                    inputs["categoria"] = SanitizeInput(project.Category);
+
+                if (!string.IsNullOrEmpty(project.TargetAudience) && !inputs.ContainsKey("segmento_alvo"))
+                    inputs["segmento_alvo"] = SanitizeInput(project.TargetAudience);
+
+                if (!string.IsNullOrEmpty(project.Description) && !inputs.ContainsKey("descricao_ideia"))
+                    inputs["descricao_ideia"] = SanitizeInput(project.Description);
+
                 if (!inputs.ContainsKey("ideia") || string.IsNullOrEmpty(inputs["ideia"]))
-                {
                     inputs["ideia"] = SanitizeInput(project.Name);
-                }
+
+                _logger.LogInformation("[DocumentGeneration] Inputs enriquecidos com dados do projeto: categoria={Cat}, segmento={Seg}, regiao={Reg}",
+                    project.Category ?? "n/a", project.TargetAudience ?? "n/a", project.Region ?? "n/a");
             }
         }
         catch (Exception ex)
