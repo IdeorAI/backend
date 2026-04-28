@@ -28,7 +28,7 @@ public class ProjectService : IProjectService
         {
             var response = await _supabase
                 .From<ProjectModel>()
-                .Select("*, tasks(*)")
+                .Select("*")
                 .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
                 .Filter("owner_id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
                 .Single();
@@ -56,7 +56,7 @@ public class ProjectService : IProjectService
         {
             var response = await _supabase
                 .From<ProjectModel>()
-                .Select("*, tasks(*)")
+                .Select("*")
                 .Filter("owner_id", Supabase.Postgrest.Constants.Operator.Equals, userId.ToString())
                 .Order("updated_at", Supabase.Postgrest.Constants.Ordering.Descending)
                 .Get();
