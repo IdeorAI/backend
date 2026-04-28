@@ -395,9 +395,9 @@ public class DocumentGenerationService : IDocumentGenerationService
             {
                 TaskId = createdTask.Id.ToString(),
                 UserId = userId.ToString(),
-                InputText = prompt,
+                InputText = prompt.Length > 2000 ? prompt[..2000] + "…" : prompt,
                 OutputJson = null, // output_json é jsonb — omitido para evitar falha de deserialização na resposta
-                ModelUsed = !string.IsNullOrEmpty(aiModelName) ? aiModelName : "gemini-rotação-inteligente",
+                ModelUsed = !string.IsNullOrEmpty(aiModelName) ? aiModelName : "openrouter-rotação-inteligente",
                 TokensUsed = totalTokens,
                 InputTokens = aiInputTokens > 0 ? aiInputTokens : null,
                 OutputTokens = aiOutputTokens > 0 ? aiOutputTokens : null,

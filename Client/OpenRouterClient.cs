@@ -90,11 +90,30 @@ public class OpenRouterClient
 
                 var root = json.RootElement;
 
-                var content = root
+                var contentEl = root
                     .GetProperty("choices")[0]
                     .GetProperty("message")
-                    .GetProperty("content")
-                    .GetString();
+                    .GetProperty("content");
+
+                string? content;
+                if (contentEl.ValueKind == JsonValueKind.Array)
+                {
+                    // Minimax retorna [{type:"text", text:"..."}]
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var part in contentEl.EnumerateArray())
+                    {
+                        if (part.TryGetProperty("text", out var textPart))
+                            sb.Append(textPart.GetString());
+                    }
+                    content = sb.ToString();
+                }
+                else
+                {
+                    content = contentEl.GetString();
+                }
+
+                if (!string.IsNullOrEmpty(content))
+                    content = StripCodeFences(content);
 
                 if (string.IsNullOrEmpty(content))
                 {
@@ -127,5 +146,17 @@ public class OpenRouterClient
         throw new InvalidOperationException(
             $"OpenRouter: todos os modelos ({string.Join(", ", _models)}) falharam após {maxRounds} rodadas. " +
             "Verifique os limites de requisição das suas chaves ou aguarde alguns minutos.");
+    }
+
+    private static string StripCodeFences(string text)
+    {
+        var t = text.Trim();
+        if (t.StartsWith("```"))
+        {
+            var firstNewline = t.IndexOf('\n');
+            if (firstNewline >= 0) t = t[(firstNewline + 1)..];
+            if (t.EndsWith("```")) t = t[..^3].TrimEnd();
+        }
+        return t;
     }
 }
