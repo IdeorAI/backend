@@ -90,7 +90,7 @@ public class DocumentsController : ControllerBase
 
         if (task == null)
         {
-            return BadRequest(new { error = "Failed to generate document. Check project access and stage." });
+            return BadRequest(new { error = "Falha ao gerar documento. Se o erro persistir, aguarde 1 minuto e tente novamente (limite de requisições da IA)." });
         }
 
         // Validar se o JSON foi salvo corretamente

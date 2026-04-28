@@ -159,7 +159,8 @@ builder.Services.AddLogging(logging =>
 // Configuração da chave Gemini (opcional se OpenRouter estiver configurado)
 var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
 var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
-var openRouterModel = builder.Configuration["OpenRouter:Model"] ?? "google/gemma-3-12b-it:free";
+var openRouterModel  = builder.Configuration["OpenRouter:Model"]  ?? "google/gemma-3-12b-it:free";
+var openRouterModel2 = builder.Configuration["OpenRouter:Model2"];
 
 if (string.IsNullOrEmpty(geminiApiKey) && string.IsNullOrEmpty(openRouterApiKey))
 {
@@ -172,8 +173,10 @@ builder.Services.AddSingleton<BackendMetrics>();
 // OpenRouter Client (prioritário se configurado)
 if (!string.IsNullOrEmpty(openRouterApiKey))
 {
-    Log.Information("OpenRouter configured with model {Model}", openRouterModel);
-    
+    var models = new List<string> { openRouterModel };
+    if (!string.IsNullOrWhiteSpace(openRouterModel2)) models.Add(openRouterModel2);
+    Log.Information("OpenRouter configured with {Count} model(s): {Models}", models.Count, string.Join(", ", models));
+
     builder.Services.AddHttpClient("OpenRouter", client =>
     {
         client.BaseAddress = new Uri("https://openrouter.ai/api/v1/");
@@ -182,11 +185,11 @@ if (!string.IsNullOrEmpty(openRouterApiKey))
         client.DefaultRequestHeaders.Add("HTTP-Referer", "https://ideorai.com");
         client.DefaultRequestHeaders.Add("X-Title", "IdeorAI");
     });
-    
-    builder.Services.AddSingleton(provider => 
+
+    builder.Services.AddSingleton(provider =>
         new OpenRouterClient(
             provider.GetRequiredService<IHttpClientFactory>(),
-            openRouterModel,
+            models,
             provider.GetRequiredService<ILogger<OpenRouterClient>>()));
 }
 else

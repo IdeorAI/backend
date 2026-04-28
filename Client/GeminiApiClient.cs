@@ -125,7 +125,7 @@ namespace IdeorAI.Client
         private async Task<T> RetryWithExponentialBackoffAsync<T>(
             Func<Task<T>> operation,
             int maxRetries = 3,
-            int baseDelayMs = 3000, // AUMENTADO: 3s → 6s → 12s (antes: 2s → 4s → 8s)
+            int baseDelayMs = 3000,
             CancellationToken ct = default)
         {
             int attempt = 0;
@@ -145,7 +145,11 @@ namespace IdeorAI.Client
                 {
                     attempt++;
                     lastException = ex;
-                    int delayMs = baseDelayMs * (int)Math.Pow(2, attempt - 1); // Exponential backoff: 3s, 6s, 12s
+
+                    // 429 rate limit needs much longer recovery time than transient 503/500
+                    int delayMs = ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                        ? 15000 * (int)Math.Pow(2, attempt - 1)  // 15s, 30s, 60s
+                        : baseDelayMs * (int)Math.Pow(2, attempt - 1); // 3s, 6s, 12s
 
                     _logger.LogWarning(
                         "[GeminiRetry] API error {StatusCode}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})",
@@ -220,10 +224,16 @@ namespace IdeorAI.Client
                                     }
                                 }
                             }
+                        },
+                        generationConfig = new Model.GenerationConfig
+                        {
+                            maxOutputTokens = 8192,
+                            thinkingConfig = new Model.ThinkingConfig { thinkingBudget = 1024 }
                         }
                     };
 
-                    string jsonRequest = JsonConvert.SerializeObject(request);
+                    string jsonRequest = JsonConvert.SerializeObject(request,
+                        new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
                     var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
                     HttpResponseMessage response = await _http.PostAsync(url, content, ct);
@@ -284,10 +294,16 @@ namespace IdeorAI.Client
                                         }
                                     }
                                 }
+                            },
+                            generationConfig = new Model.GenerationConfig
+                            {
+                                maxOutputTokens = 8192,
+                                thinkingConfig = new Model.ThinkingConfig { thinkingBudget = 1024 }
                             }
                         };
 
-                        string jsonRequest = JsonConvert.SerializeObject(request);
+                        string jsonRequest = JsonConvert.SerializeObject(request,
+                            new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
                         var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
 
                         HttpResponseMessage response = await _http.PostAsync(url, content, ct);
