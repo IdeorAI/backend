@@ -161,6 +161,7 @@ var geminiApiKey = builder.Configuration["Gemini:ApiKey"];
 var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
 var openRouterModel  = builder.Configuration["OpenRouter:Model"]  ?? "google/gemma-3-12b-it:free";
 var openRouterModel2 = builder.Configuration["OpenRouter:Model2"];
+var openRouterModel3 = builder.Configuration["OpenRouter:Model3"];
 
 if (string.IsNullOrEmpty(geminiApiKey) && string.IsNullOrEmpty(openRouterApiKey))
 {
@@ -175,6 +176,7 @@ if (!string.IsNullOrEmpty(openRouterApiKey))
 {
     var models = new List<string> { openRouterModel };
     if (!string.IsNullOrWhiteSpace(openRouterModel2)) models.Add(openRouterModel2);
+    if (!string.IsNullOrWhiteSpace(openRouterModel3)) models.Add(openRouterModel3);
     Log.Information("OpenRouter configured with {Count} model(s): {Models}", models.Count, string.Join(", ", models));
 
     builder.Services.AddHttpClient("OpenRouter", client =>
