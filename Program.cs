@@ -1,9 +1,13 @@
 using IdeorAI.Client;
 using IdeorAI.Services;
 using IdeorAI.Api.Services;
+using IdeorAI.HealthChecks;
 using IdeorAI.Middleware;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Http.Resilience;
 using Serilog;
 using Serilog.Formatting.Compact;
 using OpenTelemetry;
@@ -175,13 +179,17 @@ if (string.IsNullOrEmpty(geminiApiKey) &&
 // Registrar métricas personalizadas
 builder.Services.AddSingleton<BackendMetrics>();
 
+// ── LlmResilienceOptions ─────────────────────────────────────────────────────
+builder.Services.Configure<IdeorAI.Options.LlmResilienceOptions>(
+    builder.Configuration.GetSection(IdeorAI.Options.LlmResilienceOptions.Section));
+
 // ── DeepSeek Client (priority 1 — primário) ──────────────────────────────────
 if (!string.IsNullOrEmpty(deepSeekApiKey))
 {
     builder.Services.Configure<IdeorAI.Options.DeepSeekOptions>(opts =>
     {
         opts.ApiKey      = deepSeekApiKey;
-        opts.Model       = builder.Configuration["DeepSeek:Model"]       ?? "deepseek-chat";
+        opts.Model       = builder.Configuration["DeepSeek:Model"]       ?? "deepseek-v4-flash";
         opts.MaxTokens   = int.TryParse(builder.Configuration["DeepSeek:MaxTokens"],   out var mt) ? mt : 8000;
         opts.Temperature = float.TryParse(builder.Configuration["DeepSeek:Temperature"], System.Globalization.NumberStyles.Float,
                                System.Globalization.CultureInfo.InvariantCulture, out var temp) ? temp : 0.7f;
@@ -190,13 +198,30 @@ if (!string.IsNullOrEmpty(deepSeekApiKey))
 
     builder.Services.AddHttpClient("DeepSeek", client =>
     {
-        client.Timeout = TimeSpan.FromSeconds(60);
         client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", deepSeekApiKey);
+    })
+    .AddStandardResilienceHandler(options =>
+    {
+        // 3 retries com backoff exponencial + jitter (2s, 4s, 8s ± jitter)
+        options.Retry.MaxRetryAttempts = 3;
+        options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
+        options.Retry.UseJitter = true;
+        options.Retry.Delay = TimeSpan.FromSeconds(2);
+
+        // Circuit breaker: abre após 5 falhas em 30s, permanece aberto 30s
+        options.CircuitBreaker.MinimumThroughput = 5;
+        options.CircuitBreaker.FailureRatio = 0.6;
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
+
+        // Timeout por tentativa e timeout total (inclui todas as retentativas)
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(240);
     });
 
     builder.Services.AddSingleton<IdeorAI.Client.ILlmClient, IdeorAI.Client.DeepSeekClient>();
-    Log.Information("DeepSeek configurado como provider primário (priority=1)");
+    Log.Information("DeepSeek configurado como provider primário (priority=1) com Polly v8 resilience");
 }
 
 // ── OpenRouter Client (priority 2 — fallback) ─────────────────────────────────
@@ -210,13 +235,30 @@ if (!string.IsNullOrEmpty(openRouterApiKey))
     builder.Services.AddHttpClient("OpenRouter", client =>
     {
         client.BaseAddress = new Uri("https://openrouter.ai/api/v1/");
-        client.Timeout = TimeSpan.FromSeconds(90);
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", openRouterApiKey);
         client.DefaultRequestHeaders.Add("HTTP-Referer", "https://ideorai.com");
         client.DefaultRequestHeaders.Add("X-Title", "IdeorAI");
+    })
+    .AddStandardResilienceHandler(options =>
+    {
+        // Retry conservador — OpenRouterClient já faz rotação de modelos internamente;
+        // Polly cobre apenas falhas de rede/5xx por tentativa individual
+        options.Retry.MaxRetryAttempts = 1;
+        options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
+        options.Retry.UseJitter = true;
+        options.Retry.Delay = TimeSpan.FromSeconds(1);
+
+        // Circuit breaker para proteger em cascata de falhas
+        options.CircuitBreaker.MinimumThroughput = 5;
+        options.CircuitBreaker.FailureRatio = 0.7;
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(20);
+
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(200);
     });
 
-    builder.Services.AddSingleton(provider =>
+    builder.Services.AddSingleton<IdeorAI.Client.ILlmClient>(provider =>
         new OpenRouterClient(
             provider.GetRequiredService<IHttpClientFactory>(),
             models,
@@ -271,12 +313,6 @@ builder.Services.AddHttpClient<HubSpotService>(client =>
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 });
 
-// Registrar serviços instrumentados somente se Gemini for o cliente primário
-// (OpenRouter tem prioridade e não registra GeminiApiClient, então InstrumentedGeminiService não pode ser ativado)
-if (!string.IsNullOrEmpty(geminiApiKey) && string.IsNullOrEmpty(openRouterApiKey))
-{
-    builder.Services.AddSingleton<InstrumentedGeminiService>();
-}
 
 // CORS - Configuração ajustada para Vercel + Render
 const string FrontendCors = "FrontendCors";
@@ -333,6 +369,9 @@ builder.Services.AddCors(opt =>
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddHealthChecks()
+    .AddCheck<LlmHealthCheck>("llm-providers", tags: ["llm", "ready"]);
 
 // Rate Limiting — 50 gerações IA por hora por usuário (configurável)
 builder.Services.AddRateLimiter(options =>
@@ -471,11 +510,33 @@ app.UseOpenTelemetryPrometheusScrapingEndpoint();
 app.UseAuthorization();
 app.MapControllers();
 
-// Health check endpoint simples
+// Health check simples
 app.MapGet("/api/health", () => Results.Ok(new {
     status = "healthy",
     timestamp = DateTime.UtcNow,
     environment = app.Environment.EnvironmentName
-})).WithTags("Health");
+})).WithTags("Health").AllowAnonymous();
+
+// Health check LLM — retorna estado dos providers com métricas de falhas
+app.MapHealthChecks("/api/health/llm", new HealthCheckOptions
+{
+    ResponseWriter = async (ctx, report) =>
+    {
+        ctx.Response.ContentType = "application/json";
+        await ctx.Response.WriteAsJsonAsync(new
+        {
+            status    = report.Status.ToString().ToLowerInvariant(),
+            duration  = report.TotalDuration,
+            providers = report.Entries.ToDictionary(
+                e => e.Key,
+                e => new
+                {
+                    status      = e.Value.Status.ToString().ToLowerInvariant(),
+                    description = e.Value.Description,
+                    data        = e.Value.Data
+                })
+        });
+    }
+}).AllowAnonymous().WithTags("Health");
 
 app.Run();

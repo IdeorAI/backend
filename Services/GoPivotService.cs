@@ -9,8 +9,7 @@ public class GoPivotService : IGoPivotService
 {
     private readonly Supabase.Client _supabase;
     private readonly IStageSummaryService _stageSummaryService;
-    private readonly OpenRouterClient? _openRouterClient;
-    private readonly GeminiApiClient? _geminiClient;
+    private readonly ILlmFallbackService _llmFallbackService;
     private readonly ILogger<GoPivotService> _logger;
 
     private const string SystemPrompt = """
@@ -46,14 +45,13 @@ public class GoPivotService : IGoPivotService
     public GoPivotService(
         Supabase.Client supabase,
         IStageSummaryService stageSummaryService,
-        ILogger<GoPivotService> logger,
-        IServiceProvider serviceProvider)
+        ILlmFallbackService llmFallbackService,
+        ILogger<GoPivotService> logger)
     {
         _supabase = supabase;
         _stageSummaryService = stageSummaryService;
+        _llmFallbackService = llmFallbackService;
         _logger = logger;
-        _openRouterClient = serviceProvider.GetService<OpenRouterClient>();
-        _geminiClient = serviceProvider.GetService<GeminiApiClient>();
     }
 
     public async Task<GoPivotResponseDto?> GetExistingAsync(Guid projectId)
@@ -140,16 +138,8 @@ public class GoPivotService : IGoPivotService
     private string BuildPrompt(string etapa1Text, string etapa2Text) =>
         $"{SystemPrompt}\n\nCONTEXTO DA IDEIA:\n\n=== ETAPA 1 — Problema e Oportunidade ===\n{etapa1Text}\n\n=== ETAPA 2 — Validação de Mercado ===\n{etapa2Text}";
 
-    private async Task<GeminiResult> CallLlmAsync(string prompt)
-    {
-        if (_openRouterClient != null)
-            return await _openRouterClient.GenerateContentWithMetadataAsync(prompt);
-
-        if (_geminiClient != null)
-            return await _geminiClient.GenerateContentWithMetadataAsync(prompt, "go-pivot");
-
-        throw new InvalidOperationException("Nenhum cliente de IA configurado.");
-    }
+    private Task<LlmResult> CallLlmAsync(string prompt)
+        => _llmFallbackService.GenerateAsync(prompt);
 
     private static GoPivotResponseDto ParseVerdict(string raw)
     {

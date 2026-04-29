@@ -5,15 +5,10 @@ using System.Text.Json;
 
 namespace IdeorAI.Services;
 
-/// <summary>
-/// Serviço de geração de documentos via IA (Gemini ou OpenRouter)
-/// Implementação com Supabase Client
-/// </summary>
 public class DocumentGenerationService : IDocumentGenerationService
 {
     private readonly Supabase.Client _supabase;
-    private readonly GeminiApiClient? _geminiClient;
-    private readonly OpenRouterClient? _openRouterClient;
+    private readonly ILlmFallbackService _llmFallbackService;
     private readonly IStageService _stageService;
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
@@ -27,12 +22,10 @@ public class DocumentGenerationService : IDocumentGenerationService
         IStageSummaryService stageSummaryService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration,
-        GeminiApiClient? geminiClient = null,
-        OpenRouterClient? openRouterClient = null)
+        ILlmFallbackService llmFallbackService)
     {
         _supabase = supabase;
-        _geminiClient = geminiClient;
-        _openRouterClient = openRouterClient;
+        _llmFallbackService = llmFallbackService;
         _stageService = stageService;
         _projectService = projectService;
         _stageSummaryService = stageSummaryService;
@@ -40,34 +33,10 @@ public class DocumentGenerationService : IDocumentGenerationService
         _configuration = configuration;
     }
 
-    /// <summary>
-    /// Chama a API de IA configurada (OpenRouter ou Gemini)
-    /// </summary>
-    private async Task<string> CallAiApiAsync(string prompt, string stage = "")
+    private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
     {
-        var result = await CallAiApiWithMetadataAsync(prompt, stage);
-        return result.Text;
-    }
-
-    /// <summary>
-    /// Versão que retorna texto + tokens reais de input/output da Gemini.
-    /// Para OpenRouter, tokens ficam em 0 (API não retorna metadata de uso).
-    /// </summary>
-    private async Task<GeminiResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
-    {
-        if (_openRouterClient != null)
-        {
-            _logger.LogInformation("[DocumentGeneration] Using OpenRouter for stage {Stage}", stage);
-            return await _openRouterClient.GenerateContentWithMetadataAsync(prompt);
-        }
-
-        if (_geminiClient != null)
-        {
-            _logger.LogInformation("[DocumentGeneration] Using Gemini for stage {Stage}", stage);
-            return await _geminiClient.GenerateContentWithMetadataAsync(prompt, stage);
-        }
-
-        throw new InvalidOperationException("Nenhum cliente de IA configurado");
+        _logger.LogInformation("[DocumentGeneration] Chamando IA para stage {Stage}", stage);
+        return await _llmFallbackService.GenerateAsync(prompt);
     }
 
     private const int MaxContextLength = 3500;
@@ -340,7 +309,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         string aiModelName = "";
         try
         {
-            _logger.LogInformation("[DocumentGeneration] Chamando Gemini API para stage {Stage}...", stage);
+            _logger.LogInformation("[DocumentGeneration] Chamando IA (fallback chain) para stage {Stage}...", stage);
             var startTime = DateTime.UtcNow;
 
             var aiResult = await CallAiApiWithMetadataAsync(prompt, stage);
@@ -350,8 +319,8 @@ public class DocumentGenerationService : IDocumentGenerationService
             aiModelName      = aiResult.ModelName;
 
             var elapsed = DateTime.UtcNow - startTime;
-            _logger.LogInformation("[DocumentGeneration] Gemini API respondeu. Tempo: {ElapsedMs}ms, Input: {In}t, Output: {Out}t",
-                elapsed.TotalMilliseconds, aiInputTokens, aiOutputTokens);
+            _logger.LogInformation("[DocumentGeneration] IA respondeu ({Provider}/{Model}). Tempo: {ElapsedMs}ms, Input: {In}t, Output: {Out}t",
+                aiResult.ProviderName, aiModelName, elapsed.TotalMilliseconds, aiInputTokens, aiOutputTokens);
         }
         catch (Exception ex)
         {
@@ -403,11 +372,12 @@ public class DocumentGenerationService : IDocumentGenerationService
 
             var evaluationModel = new IaEvaluationModel
             {
+                Id = Guid.NewGuid().ToString(),
                 TaskId = createdTask.Id.ToString(),
                 UserId = userId.ToString(),
-                InputText = prompt.Length > 2000 ? prompt[..2000] + "…" : prompt,
-                OutputJson = null, // output_json é jsonb — omitido para evitar falha de deserialização na resposta
-                ModelUsed = !string.IsNullOrEmpty(aiModelName) ? aiModelName : "openrouter-rotação-inteligente",
+                InputText = prompt.Length > 500 ? prompt[..500] + "…" : prompt,
+                OutputJson = null,
+                ModelUsed = !string.IsNullOrEmpty(aiModelName) ? aiModelName : "llm-fallback",
                 TokensUsed = totalTokens,
                 InputTokens = aiInputTokens > 0 ? aiInputTokens : null,
                 OutputTokens = aiOutputTokens > 0 ? aiOutputTokens : null,
@@ -547,11 +517,12 @@ public class DocumentGenerationService : IDocumentGenerationService
 
             var evaluationModel = new IaEvaluationModel
             {
+                Id = Guid.NewGuid().ToString(),
                 TaskId = taskId.ToString(),
                 UserId = userId.ToString(),
-                InputText = prompt,
+                InputText = prompt.Length > 500 ? prompt[..500] + "…" : prompt,
                 OutputJson = null,
-                ModelUsed = !string.IsNullOrEmpty(regenModelName) ? regenModelName : "gemini-rotação-inteligente",
+                ModelUsed = !string.IsNullOrEmpty(regenModelName) ? regenModelName : "llm-fallback",
                 TokensUsed = regenTotal,
                 InputTokens = regenInputTokens > 0 ? regenInputTokens : null,
                 OutputTokens = regenOutputTokens > 0 ? regenOutputTokens : null,
@@ -642,11 +613,12 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
 
             var evaluationModel = new IaEvaluationModel
             {
+                Id = Guid.NewGuid().ToString(),
                 TaskId = taskId.ToString(),
                 UserId = userId.ToString(),
-                InputText = refinementPrompt,
+                InputText = refinementPrompt.Length > 500 ? refinementPrompt[..500] + "…" : refinementPrompt,
                 OutputJson = null,
-                ModelUsed = !string.IsNullOrEmpty(refineModelName) ? refineModelName : "gemini-rotação-inteligente",
+                ModelUsed = !string.IsNullOrEmpty(refineModelName) ? refineModelName : "llm-fallback",
                 TokensUsed = refineTotal,
                 InputTokens = refineInputTokens > 0 ? refineInputTokens : null,
                 OutputTokens = refineOutputTokens > 0 ? refineOutputTokens : null,

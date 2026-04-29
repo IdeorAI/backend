@@ -12,6 +12,8 @@ namespace IdeorAI.Client
         public Counter<long> GeminiErrors { get; }
         public Counter<long> BackendErrors { get; }
         public UpDownCounter<long> RequestsInFlight { get; }
+        public Counter<long> LlmRequestsTotal { get; }
+        public Histogram<double> LlmDurationSeconds { get; }
 
         public BackendMetrics()
         {
@@ -41,6 +43,16 @@ namespace IdeorAI.Client
                 "requests_inflight",
                 "requests",
                 "Number of requests currently in flight");
+
+            LlmRequestsTotal = _meter.CreateCounter<long>(
+                "llm_requests_total",
+                "requests",
+                "Total LLM calls by provider, model and status");
+
+            LlmDurationSeconds = _meter.CreateHistogram<double>(
+                "llm_duration_seconds",
+                "seconds",
+                "LLM call duration by provider");
         }
     }
 }

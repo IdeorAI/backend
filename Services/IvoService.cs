@@ -8,13 +8,12 @@ namespace IdeorAI.Services;
 /// <summary>
 /// Implementação do IvoService.
 /// Ver IIvoService para documentação completa da fórmula e variáveis.
-/// Suporta Gemini (InstrumentedGeminiService) ou OpenRouter — usa o que estiver disponível.
+/// Usa ILlmFallbackService para avaliação — DeepSeek (primário) → OpenRouter → Gemini.
 /// </summary>
 public class IvoService : IIvoService
 {
     private readonly Supabase.Client _supabase;
-    private readonly InstrumentedGeminiService? _gemini;
-    private readonly OpenRouterClient? _openRouterClient;
+    private readonly ILlmFallbackService _llmFallbackService;
     private readonly ILogger<IvoService> _logger;
 
     // Variáveis IVO avaliadas por etapa
@@ -48,13 +47,11 @@ public class IvoService : IIvoService
 
     public IvoService(
         Supabase.Client supabase,
-        ILogger<IvoService> logger,
-        InstrumentedGeminiService? gemini = null,
-        OpenRouterClient? openRouterClient = null)
+        ILlmFallbackService llmFallbackService,
+        ILogger<IvoService> logger)
     {
         _supabase = supabase;
-        _gemini = gemini;
-        _openRouterClient = openRouterClient;
+        _llmFallbackService = llmFallbackService;
         _logger = logger;
     }
 
@@ -319,29 +316,15 @@ public class IvoService : IIvoService
 
     private async Task<Dictionary<string, decimal>> CallGeminiEvaluationAsync(int stageNumber, string[] variables, string content)
     {
-        // Valor padrão (neutro) para cada variável solicitada
         var defaults = variables.ToDictionary(v => v, _ => 5.0m);
-
-        // Se nenhum cliente de IA estiver disponível, retorna defaults sem erro
-        if (_gemini == null && _openRouterClient == null)
-        {
-            _logger.LogWarning("IVO: nenhum cliente de IA disponível para stage {Stage}, usando defaults", stageNumber);
-            return defaults;
-        }
 
         try
         {
             var prompt = BuildEvaluationPrompt(stageNumber, variables, content);
 
-            // OpenRouter tem prioridade; Gemini é fallback
-            string response;
-            if (_openRouterClient != null)
-                response = await _openRouterClient.GenerateContentAsync(prompt);
-            else
-                response = await _gemini!.GenerateContentAsync(prompt);
+            var llmResult = await _llmFallbackService.GenerateAsync(prompt);
 
-            // Limpar possível markdown code block
-            var cleaned = response
+            var cleaned = llmResult.Text
                 .Replace("```json", "").Replace("```", "")
                 .Trim();
 

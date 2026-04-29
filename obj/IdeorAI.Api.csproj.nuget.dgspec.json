@@ -60,6 +60,10 @@
               "target": "Package",
               "version": "[9.0.8, )"
             },
+            "Microsoft.Extensions.Http.Resilience": {
+              "target": "Package",
+              "version": "[9.5.0, )"
+            },
             "OpenTelemetry": {
               "target": "Package",
               "version": "[1.12.0, )"

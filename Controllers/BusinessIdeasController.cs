@@ -25,26 +25,24 @@ namespace IdeorAI.Api.Controllers
     [Route("api/[controller]")]
     public class BusinessIdeasController : ControllerBase
     {
-        private readonly GeminiApiClient? _geminiApiClient;
-        private readonly OpenRouterClient? _openRouterClient;
+        private readonly ILlmFallbackService _llmFallbackService;
         private readonly BackendMetrics _metrics;
         private readonly ILogger<BusinessIdeasController> _logger;
         private readonly IHttpClientFactory _httpFactory;
         private readonly IConfiguration _config;
 
         public BusinessIdeasController(
+            ILlmFallbackService llmFallbackService,
             BackendMetrics metrics,
             ILogger<BusinessIdeasController> logger,
             IHttpClientFactory httpFactory,
-            IConfiguration config,
-            IServiceProvider serviceProvider)
+            IConfiguration config)
         {
+            _llmFallbackService = llmFallbackService;
             _metrics = metrics;
             _logger = logger;
             _httpFactory = httpFactory;
             _config = config;
-            _geminiApiClient = serviceProvider.GetService<GeminiApiClient>();
-            _openRouterClient = serviceProvider.GetService<OpenRouterClient>();
         }
 
         [HttpPost("suggest-by-segment")]
@@ -71,14 +69,7 @@ namespace IdeorAI.Api.Controllers
                 _logger.LogInformation("Generating {Count} ideas for segment: {Segment} - RequestId: {RequestId}",
                     count, req.SegmentDescription, requestId);
 
-                List<string> ideas;
-
-                if (_geminiApiClient != null)
-                    ideas = await _geminiApiClient.GenerateSegmentIdeasAsync(req.SegmentDescription, count, ct);
-                else if (_openRouterClient != null)
-                    ideas = await GenerateSegmentIdeasViaOpenRouterAsync(req.SegmentDescription, count, ct);
-                else
-                    return StatusCode(503, new { error = "Nenhum cliente de IA configurado.", requestId });
+                var ideas = await GenerateSegmentIdeasAsync(req.SegmentDescription, count, ct);
 
                 _logger.LogInformation("Successfully generated {Count} segment ideas - RequestId: {RequestId}",
                     ideas.Count, requestId);
@@ -94,7 +85,7 @@ namespace IdeorAI.Api.Controllers
 
                 return Ok(new GenerateIdeasResponse { Ideas = ideas, RequestId = requestId });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("falharam"))
+            catch (Exception ex) when (ex is IdeorAI.Client.LlmUnavailableException || (ex is InvalidOperationException && ex.Message.Contains("falharam")))
             {
                 _logger.LogWarning(ex, "Rate limit OpenRouter (suggest-by-segment) - RequestId: {RequestId}", requestId);
                 return StatusCode(429, new { error = "Limite de requisições da IA atingido. Aguarde 1 minuto e tente novamente.", requestId });
@@ -122,14 +113,7 @@ namespace IdeorAI.Api.Controllers
 
             try
             {
-                List<string> ideas;
-
-                if (_geminiApiClient != null)
-                    ideas = await _geminiApiClient.GenerateStartupIdeasAsync(req.SeedIdea ?? "", req.SegmentDescription, ct);
-                else if (_openRouterClient != null)
-                    ideas = await GenerateStartupIdeasViaOpenRouterAsync(req.SeedIdea ?? "", req.SegmentDescription, ct);
-                else
-                    return StatusCode(503, new { error = "Nenhum cliente de IA configurado.", requestId });
+                var ideas = await GenerateStartupIdeasAsync(req.SeedIdea ?? "", req.SegmentDescription, ct);
 
                 _ = Task.Run(async () =>
                 {
@@ -143,7 +127,7 @@ namespace IdeorAI.Api.Controllers
             {
                 return StatusCode(499, new { error = "Cancelado pelo cliente.", requestId });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("falharam"))
+            catch (Exception ex) when (ex is IdeorAI.Client.LlmUnavailableException || (ex is InvalidOperationException && ex.Message.Contains("falharam")))
             {
                 _logger.LogWarning(ex, "Rate limit OpenRouter (suggest-and-save) - RequestId: {RequestId}", requestId);
                 return StatusCode(429, new { error = "Limite de requisições da IA atingido. Aguarde 1 minuto e tente novamente.", requestId });
@@ -155,7 +139,7 @@ namespace IdeorAI.Api.Controllers
             }
         }
 
-        private async Task<List<string>> GenerateSegmentIdeasViaOpenRouterAsync(string segmentDescription, int count, CancellationToken ct)
+        private async Task<List<string>> GenerateSegmentIdeasAsync(string segmentDescription, int count, CancellationToken ct)
         {
             string segment = (segmentDescription ?? "").Trim();
             if (segment.Length > 400) segment = segment[..400];
@@ -173,11 +157,11 @@ namespace IdeorAI.Api.Controllers
                 SEGMENTO: "{{segment}}"
                 """;
 
-            var result = await _openRouterClient!.GenerateContentWithMetadataAsync(prompt);
+            var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
             return ParseIdeasJson(result.Text, count);
         }
 
-        private async Task<List<string>> GenerateStartupIdeasViaOpenRouterAsync(string seedIdea, string segmentDescription, CancellationToken ct)
+        private async Task<List<string>> GenerateStartupIdeasAsync(string seedIdea, string segmentDescription, CancellationToken ct)
         {
             string seed = (seedIdea ?? "").Trim();
             if (seed.Length > 400) seed = seed[..400];
@@ -196,7 +180,7 @@ namespace IdeorAI.Api.Controllers
                 SEGMENTO: "{{segment}}"
                 """;
 
-            var result = await _openRouterClient!.GenerateContentWithMetadataAsync(prompt);
+            var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
             return ParseSimpleIdeasJson(result.Text);
         }
 

@@ -12,6 +12,18 @@ public record LlmResult(
     string ProviderName,
     long DurationMs);
 
+public record LlmProviderHealth(
+    string ProviderName,
+    int Priority,
+    int ConsecutiveFailures,
+    DateTimeOffset? LastSuccessAt,
+    DateTimeOffset? LastFailureAt)
+{
+    public bool IsHealthy   => ConsecutiveFailures == 0;
+    public bool IsDegraded  => ConsecutiveFailures is > 0 and < 5;
+    public bool IsUnhealthy => ConsecutiveFailures >= 5;
+}
+
 public sealed class LlmUnavailableException(
     string message,
     IReadOnlyList<Exception> innerExceptions)
