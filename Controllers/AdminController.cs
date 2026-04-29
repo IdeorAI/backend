@@ -171,6 +171,99 @@ public class AdminController : ControllerBase
         var isAdmin = await IsAdminAsync(userId);
         return Ok(new { isAdmin });
     }
+
+    /// <summary>
+    /// Diagnóstico da feature de token observability — sem restrição de admin
+    /// GET /api/admin/diag?userId=xxx
+    /// </summary>
+    [HttpGet("diag")]
+    public async Task<IActionResult> GetDiag(
+        [FromQuery] string? userId = null,
+        [FromHeader(Name = "x-user-id")] string? headerUserId = null)
+    {
+        var uid = userId ?? headerUserId ?? "(não fornecido)";
+
+        // 1. Checar is_admin do usuário
+        bool isAdmin = false;
+        string adminCheckError = "";
+        try
+        {
+            if (Guid.TryParse(uid, out var userGuid))
+                isAdmin = await IsAdminAsync(userGuid);
+            else
+                adminCheckError = "userId inválido (não é GUID)";
+        }
+        catch (Exception ex)
+        {
+            adminCheckError = ex.Message;
+        }
+
+        // 2. Contar registros em ia_evaluations
+        int totalEvaluations = 0;
+        string evalError = "";
+        object? lastRecord = null;
+        try
+        {
+            var all = await _supabase
+                .From<IdeorAI.Model.SupabaseModels.IaEvaluationModel>()
+                .Select("id, user_id, model_used, tokens_used, input_tokens, output_tokens, created_at")
+                .Order("created_at", Supabase.Postgrest.Constants.Ordering.Descending)
+                .Limit(5)
+                .Get();
+
+            totalEvaluations = all.Models.Count;
+            lastRecord = all.Models.Select(r => new
+            {
+                r.Id,
+                r.UserId,
+                r.ModelUsed,
+                r.TokensUsed,
+                r.InputTokens,
+                r.OutputTokens,
+                r.CreatedAt
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            evalError = ex.Message;
+        }
+
+        // 3. Checar perfil do usuário
+        string profileError = "";
+        object? profileInfo = null;
+        try
+        {
+            if (Guid.TryParse(uid, out var ug))
+            {
+                var profile = await _supabase
+                    .From<IdeorAI.Model.SupabaseModels.ProfileModel>()
+                    .Select("id, is_admin")
+                    .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, ug.ToString())
+                    .Single();
+
+                profileInfo = profile == null
+                    ? "perfil não encontrado"
+                    : new { profile.IsAdmin };
+            }
+        }
+        catch (Exception ex)
+        {
+            profileError = ex.Message;
+        }
+
+        return Ok(new
+        {
+            userId = uid,
+            isAdmin,
+            adminCheckError,
+            totalEvaluationsReturned = totalEvaluations,
+            evalError,
+            last5Evaluations = lastRecord,
+            profileInfo,
+            profileError,
+            timestamp = DateTime.UtcNow
+        });
+    }
 }
 
 // ---- DTOs ----
