@@ -209,10 +209,11 @@ if (!string.IsNullOrEmpty(deepSeekApiKey))
         options.Retry.UseJitter = true;
         options.Retry.Delay = TimeSpan.FromSeconds(2);
 
-        // Circuit breaker: abre após 5 falhas em 30s, permanece aberto 30s
+        // Circuit breaker — SamplingDuration deve ser >= 2× AttemptTimeout (regra Polly v8)
+        // AttemptTimeout=60s → SamplingDuration >= 120s
         options.CircuitBreaker.MinimumThroughput = 5;
         options.CircuitBreaker.FailureRatio = 0.6;
-        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120);
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
 
         // Timeout por tentativa e timeout total (inclui todas as retentativas)
@@ -248,10 +249,11 @@ if (!string.IsNullOrEmpty(openRouterApiKey))
         options.Retry.UseJitter = true;
         options.Retry.Delay = TimeSpan.FromSeconds(1);
 
-        // Circuit breaker para proteger em cascata de falhas
+        // Circuit breaker — SamplingDuration deve ser >= 2× AttemptTimeout (regra Polly v8)
+        // AttemptTimeout=90s → SamplingDuration >= 180s
         options.CircuitBreaker.MinimumThroughput = 5;
         options.CircuitBreaker.FailureRatio = 0.7;
-        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(180);
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(20);
 
         options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(90);
