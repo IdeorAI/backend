@@ -69,19 +69,19 @@ public class ProjectModel : BaseModel
     public decimal IvoScore10 { get; set; } = 1.0m;
 
     [Column("ivo_o")]
-    public decimal IvoO { get; set; } = 1.0m;
+    public decimal IvoO { get; set; } = 5.0m;
 
     [Column("ivo_m")]
-    public decimal IvoM { get; set; } = 1.0m;
+    public decimal IvoM { get; set; } = 5.0m;
 
     [Column("ivo_v")]
-    public decimal IvoV { get; set; } = 1.0m;
+    public decimal IvoV { get; set; } = 5.0m;
 
     [Column("ivo_e")]
-    public decimal IvoE { get; set; } = 1.0m;
+    public decimal IvoE { get; set; } = 5.0m;
 
     [Column("ivo_t")]
-    public decimal IvoT { get; set; } = 1.0m;
+    public decimal IvoT { get; set; } = 5.0m;
 
     [Column("ivo_d")]
     public decimal IvoD { get; set; } = 1.0m;

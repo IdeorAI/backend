@@ -223,10 +223,10 @@ public class IvoService : IIvoService
 
             if (project == null) return null;
 
-            // IVO é parcial se alguma variável O/M/V/E/T ainda está em 1.0 (não avaliada pelo Gemini)
-            var isPartial = project.IvoO <= 1.0m || project.IvoM <= 1.0m ||
-                            project.IvoV <= 1.0m || project.IvoE <= 1.0m ||
-                            project.IvoT <= 1.0m;
+            // IVO é parcial se alguma variável O/M/V/E/T ainda está no valor padrão 5.0 (não avaliada pelo Gemini)
+            var isPartial = project.IvoO == 5.0m || project.IvoM == 5.0m ||
+                            project.IvoV == 5.0m || project.IvoE == 5.0m ||
+                            project.IvoT == 5.0m;
 
             var ivoValue = ComputeRawIvo(
                 project.IvoScore10,
