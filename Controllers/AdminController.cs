@@ -49,25 +49,28 @@ public class AdminController : ControllerBase
     [HttpGet("token-stats")]
     public async Task<IActionResult> GetTokenStats(
         [FromHeader(Name = "x-user-id")] Guid userId,
-        [FromQuery] DateTime? from = null,
-        [FromQuery] DateTime? to = null)
+        [FromQuery] int days = 30)
     {
         if (!await IsAdminAsync(userId))
             return Forbid();
 
-        var fromDate = from ?? DateTime.UtcNow.AddDays(-30);
-        var toDate = (to ?? DateTime.UtcNow).Date.AddDays(1).AddSeconds(-1);
+        // Usar DateTimeOffset.UtcNow garante Kind=Utc → ToString("O") produz sufixo Z
+        // que o PostgREST interpreta corretamente em colunas timestamptz
+        var now     = DateTimeOffset.UtcNow;
+        var fromDto = now.AddDays(-days);
+        var toDto   = now.AddDays(1); // margem para registros feitos hoje
 
-        _logger.LogInformation("[Admin] Token stats requested by {UserId}, range {From} - {To}",
-            userId, fromDate, toDate);
+        var fromStr = fromDto.ToString("O"); // ex: 2026-03-30T00:00:00.0000000+00:00
+        var toStr   = toDto.ToString("O");
 
-        // Buscar TODAS as avaliações no período (todos os usuários)
-        // Usando service role key — RLS bypassed completamente
+        _logger.LogInformation("[Admin] Token stats by {UserId}, last {Days}d ({From} → {To})",
+            userId, days, fromStr, toStr);
+
         var evaluations = await _supabase
             .From<IaEvaluationModel>()
             .Select("id, user_id, model_used, tokens_used, input_tokens, output_tokens, created_at, task_id")
-            .Filter("created_at", Supabase.Postgrest.Constants.Operator.GreaterThanOrEqual, fromDate.ToString("O"))
-            .Filter("created_at", Supabase.Postgrest.Constants.Operator.LessThanOrEqual, toDate.ToString("O"))
+            .Filter("created_at", Supabase.Postgrest.Constants.Operator.GreaterThanOrEqual, fromStr)
+            .Filter("created_at", Supabase.Postgrest.Constants.Operator.LessThanOrEqual, toStr)
             .Order("created_at", Supabase.Postgrest.Constants.Ordering.Descending)
             .Get();
 
