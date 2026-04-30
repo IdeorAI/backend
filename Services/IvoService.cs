@@ -282,12 +282,12 @@ public class IvoService : IIvoService
         return Math.Pow((double)score10, 1.3) * (double)(o * m * v * e * t * d) / 100_000.0;
     }
 
-    // IVO Index (R$) = min(200 × (IVO + 1)^2.2, 1_000_000)
+    // IVO Index (R$) = min(200_000 × (IVO + 1)^2.2, 1_000_000_000)
     private static decimal ComputeIvoIndex(decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
         var ivo = ComputeRawIvo(score10, o, m, v, e, t, d);
-        var ivoIndex = 200.0 * Math.Pow(ivo + 1.0, 2.2);
-        return (decimal)Math.Min(ivoIndex, 1_000_000.0);
+        var ivoIndex = 200_000.0 * Math.Pow(ivo + 1.0, 2.2);
+        return (decimal)Math.Min(ivoIndex, 1_000_000_000.0);
     }
 
     private string BuildEvaluationPrompt(int stageNumber, string[] variables, string content)
