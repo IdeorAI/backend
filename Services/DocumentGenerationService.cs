@@ -36,7 +36,7 @@ public class DocumentGenerationService : IDocumentGenerationService
     private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
     {
         _logger.LogInformation("[DocumentGeneration] Chamando IA para stage {Stage}", stage);
-        return await _llmFallbackService.GenerateAsync(prompt);
+        return await _llmFallbackService.GenerateAsync(prompt, new LlmOptions(SkipCentralMetrics: true));
     }
 
     private const int MaxContextLength = 3500;

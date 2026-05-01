@@ -2,7 +2,10 @@ namespace IdeorAI.Client;
 
 public record LlmOptions(
     float Temperature = 0.7f,
-    int MaxTokens = 8000);
+    int MaxTokens = 8000,
+    bool SkipCentralMetrics = false,
+    string? UserId = null,
+    string? SourceContext = null);
 
 public record LlmResult(
     string Text,

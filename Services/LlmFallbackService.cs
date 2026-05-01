@@ -1,4 +1,5 @@
 using IdeorAI.Client;
+using IdeorAI.Model.SupabaseModels;
 using System.Collections.Concurrent;
 
 namespace IdeorAI.Services;
@@ -6,6 +7,7 @@ namespace IdeorAI.Services;
 public sealed class LlmFallbackService(
     IEnumerable<ILlmClient> clients,
     BackendMetrics metrics,
+    Supabase.Client supabase,
     ILogger<LlmFallbackService> logger) : ILlmFallbackService
 {
     private readonly IReadOnlyList<ILlmClient> _clients =
@@ -40,6 +42,9 @@ public sealed class LlmFallbackService(
 
                 logger.LogInformation("[LLM] ✅ Sucesso via {Provider}/{Model} — {In}t in, {Out}t out, {Ms}ms",
                     result.ProviderName, result.ModelName, result.InputTokens, result.OutputTokens, result.DurationMs);
+
+                if (options?.SkipCentralMetrics != true)
+                    _ = RecordTokenUsageAsync(result, options, prompt);
 
                 return result;
             }
@@ -78,6 +83,36 @@ public sealed class LlmFallbackService(
         throw new LlmUnavailableException(
             $"Todos os {_clients.Count} provider(s) LLM falharam. Detalhes: {summary}",
             errors.AsReadOnly());
+    }
+
+    private async Task RecordTokenUsageAsync(LlmResult result, LlmOptions? options, string prompt)
+    {
+        try
+        {
+            var totalTokens = result.InputTokens + result.OutputTokens > 0
+                ? result.InputTokens + result.OutputTokens
+                : prompt.Length / 4;
+
+            var record = new IaEvaluationModel
+            {
+                Id = Guid.NewGuid().ToString(),
+                TaskId = $"{options?.SourceContext ?? result.ProviderName}-{Guid.NewGuid()}",
+                UserId = options?.UserId,
+                InputText = prompt.Length > 500 ? prompt[..500] + "…" : prompt,
+                OutputJson = null,
+                ModelUsed = $"{result.ProviderName}/{result.ModelName}",
+                TokensUsed = totalTokens,
+                InputTokens = result.InputTokens > 0 ? result.InputTokens : null,
+                OutputTokens = result.OutputTokens > 0 ? result.OutputTokens : null,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            await supabase.From<IaEvaluationModel>().Insert(record);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[LLM] Falha ao registrar tokens no monitor: {Msg}", ex.Message);
+        }
     }
 
     public IReadOnlyDictionary<string, LlmProviderHealth> GetProviderHealth()
