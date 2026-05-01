@@ -3,23 +3,18 @@ using IdeorAI.Model.SupabaseModels;
 namespace IdeorAI.Services;
 
 /// <summary>
-/// Serviço de cálculo do score dinâmico de projetos.
-/// Fórmula: 15 pts por task com status "evaluated"
-///          +3 pts por task cujo content.Length >= 100
-///          +10 pts bônus se todas as 5 tasks estão evaluated
-///          Máximo: 100 pts
+/// Score multi-dimensional (Opção A):
+///   30% Conclusão  — etapas avaliadas / 5
+///   20% Profundidade — tier médio de conteúdo (0-3) por thresholds 100/500/1500 chars
+///   50% Qualidade IVO — média de O, M, V, E, T avaliados pelo DeepSeek
+/// Máximo: 100 pts
 /// </summary>
 public class ScoreService : IScoreService
 {
     private readonly Supabase.Client _supabase;
     private readonly ILogger<ScoreService> _logger;
 
-    private const int PtsPerEvaluatedTask = 15;
-    private const int PtsPerRichContent = 3;
-    private const int PtsAllCompleteBonus = 10;
     private const int TotalStages = 5;
-    private const int MinContentLength = 100;
-    private const int MaxScore = 100;
 
     public ScoreService(Supabase.Client supabase, ILogger<ScoreService> logger)
     {
@@ -31,12 +26,8 @@ public class ScoreService : IScoreService
     {
         try
         {
-            var tasks = await _supabase
-                .From<TaskModel>()
-                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
-                .Get();
-
-            return ComputeScore(tasks.Models);
+            var (tasks, project) = await FetchAsync(projectId);
+            return Compute(tasks, project);
         }
         catch (Exception ex)
         {
@@ -47,14 +38,10 @@ public class ScoreService : IScoreService
 
     public async Task<decimal> CalculateAndPersistAsync(string projectId)
     {
-        var score = await CalculateScoreAsync(projectId);
-
         try
         {
-            var project = await _supabase
-                .From<ProjectModel>()
-                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
-                .Single();
+            var (tasks, project) = await FetchAsync(projectId);
+            var score = Compute(tasks, project);
 
             if (project != null)
             {
@@ -64,37 +51,74 @@ public class ScoreService : IScoreService
                     .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
                     .Update(project);
 
-                _logger.LogInformation("Score {Score} persisted for project {ProjectId}", score, projectId);
+                _logger.LogInformation(
+                    "Score {Score} persisted for project {ProjectId} (completion={C:F1} depth={D:F1} quality={Q:F1})",
+                    score, projectId,
+                    CompletionPts(tasks.Where(t => t.Status == "evaluated").ToList()),
+                    DepthPts(tasks.Where(t => t.Status == "evaluated").ToList()),
+                    QualityPts(project));
             }
+
+            return score;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error persisting score for project {ProjectId}", projectId);
+            _logger.LogError(ex, "Error in CalculateAndPersistAsync for project {ProjectId}", projectId);
+            return 0;
         }
-
-        return score;
     }
 
-    private decimal ComputeScore(IEnumerable<TaskModel> tasks)
+    // ─── Private ──────────────────────────────────────────────────────────────
+
+    private async Task<(List<TaskModel> tasks, ProjectModel? project)> FetchAsync(string projectId)
     {
-        var evaluatedTasks = tasks
-            .Where(t => t.Status == "evaluated")
-            .ToList();
+        var tasksTask = _supabase
+            .From<TaskModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Get();
 
-        int pts = 0;
+        var projectTask = _supabase
+            .From<ProjectModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Single();
 
-        // 15 pts por cada task avaliada
-        pts += evaluatedTasks.Count * PtsPerEvaluatedTask;
+        await Task.WhenAll(tasksTask, projectTask);
 
-        // +3 pts por task com conteúdo rico (>= 100 chars)
-        pts += evaluatedTasks.Count(t => (t.Content?.Length ?? 0) >= MinContentLength) * PtsPerRichContent;
-
-        // +10 pts bônus se todas as 5 tasks estão completas
-        if (evaluatedTasks.Count >= TotalStages)
-        {
-            pts += PtsAllCompleteBonus;
-        }
-
-        return Math.Min(pts, MaxScore);
+        return (tasksTask.Result.Models, projectTask.Result);
     }
+
+    private static decimal Compute(List<TaskModel> tasks, ProjectModel? project)
+    {
+        var evaluated = tasks.Where(t => t.Status == "evaluated").ToList();
+        var total = CompletionPts(evaluated) + DepthPts(evaluated) + QualityPts(project);
+        return Math.Min(100m, Math.Round(total, 1));
+    }
+
+    // 30% — etapas concluídas
+    private static decimal CompletionPts(IList<TaskModel> evaluated) =>
+        (Math.Min(evaluated.Count, TotalStages) / (decimal)TotalStages) * 30m;
+
+    // 20% — profundidade média do conteúdo (tier 0-3)
+    private static decimal DepthPts(IList<TaskModel> evaluated)
+    {
+        if (evaluated.Count == 0) return 0m;
+        var avgTier = evaluated.Average(t => ContentTier(t.Content?.Length ?? 0));
+        return ((decimal)avgTier / 3m) * 20m;
+    }
+
+    // 50% — qualidade IVO avaliada pelo DeepSeek (média O/M/V/E/T, escala 1-10)
+    private static decimal QualityPts(ProjectModel? project)
+    {
+        if (project == null) return 25m; // neutro: 5/10 × 50
+        var avg = (project.IvoO + project.IvoM + project.IvoV + project.IvoE + project.IvoT) / 5m;
+        return (avg / 10m) * 50m;
+    }
+
+    private static int ContentTier(int length) => length switch
+    {
+        >= 1500 => 3,
+        >= 500  => 2,
+        >= 100  => 1,
+        _       => 0,
+    };
 }
