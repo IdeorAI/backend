@@ -3,10 +3,11 @@ using IdeorAI.Model.SupabaseModels;
 namespace IdeorAI.Services;
 
 /// <summary>
-/// Score multi-dimensional (Opção A):
-///   30% Conclusão  — etapas avaliadas / 5
-///   20% Profundidade — tier médio de conteúdo (0-3) por thresholds 100/500/1500 chars
-///   50% Qualidade IVO — média de O, M, V, E, T avaliados pelo DeepSeek
+/// Score multi-dimensional individualizado (Opções A + B):
+///   25% Conclusão  — etapas avaliadas / 5
+///   15% Profundidade — tier médio de conteúdo (0-3) por thresholds 100/500/1500 chars
+///   40% Qualidade IVO — ponderada por categoria (CategoryIvoWeights), escala 1-10
+///   20% Marcos     — marcos únicos atingidos × 4 pts (máx 5 marcos)
 /// Máximo: 100 pts
 /// </summary>
 public class ScoreService : IScoreService
@@ -15,6 +16,8 @@ public class ScoreService : IScoreService
     private readonly ILogger<ScoreService> _logger;
 
     private const int TotalStages = 5;
+    private const int MaxMilestones = 5;
+    private const decimal PtsPerMilestone = 4m;
 
     public ScoreService(Supabase.Client supabase, ILogger<ScoreService> logger)
     {
@@ -26,8 +29,8 @@ public class ScoreService : IScoreService
     {
         try
         {
-            var (tasks, project) = await FetchAsync(projectId);
-            return Compute(tasks, project);
+            var (tasks, project, milestoneCount) = await FetchAsync(projectId);
+            return Compute(tasks, project, milestoneCount);
         }
         catch (Exception ex)
         {
@@ -40,8 +43,8 @@ public class ScoreService : IScoreService
     {
         try
         {
-            var (tasks, project) = await FetchAsync(projectId);
-            var score = Compute(tasks, project);
+            var (tasks, project, milestoneCount) = await FetchAsync(projectId);
+            var score = Compute(tasks, project, milestoneCount);
 
             if (project != null)
             {
@@ -51,12 +54,14 @@ public class ScoreService : IScoreService
                     .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
                     .Update(project);
 
+                var evaluated = tasks.Where(t => t.Status == "evaluated").ToList();
                 _logger.LogInformation(
-                    "Score {Score} persisted for project {ProjectId} (completion={C:F1} depth={D:F1} quality={Q:F1})",
-                    score, projectId,
-                    CompletionPts(tasks.Where(t => t.Status == "evaluated").ToList()),
-                    DepthPts(tasks.Where(t => t.Status == "evaluated").ToList()),
-                    QualityPts(project));
+                    "Score {Score} persisted for project {ProjectId} (cat={Cat} completion={C:F1} depth={D:F1} quality={Q:F1} milestones={M:F1})",
+                    score, projectId, project.Category ?? "n/a",
+                    CompletionPts(evaluated),
+                    DepthPts(evaluated),
+                    QualityPts(project),
+                    MilestonePts(milestoneCount));
             }
 
             return score;
@@ -70,7 +75,7 @@ public class ScoreService : IScoreService
 
     // ─── Private ──────────────────────────────────────────────────────────────
 
-    private async Task<(List<TaskModel> tasks, ProjectModel? project)> FetchAsync(string projectId)
+    private async Task<(List<TaskModel> tasks, ProjectModel? project, int milestoneCount)> FetchAsync(string projectId)
     {
         var tasksTask = _supabase
             .From<TaskModel>()
@@ -82,37 +87,51 @@ public class ScoreService : IScoreService
             .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
             .Single();
 
-        await Task.WhenAll(tasksTask, projectTask);
+        var milestonesTask = _supabase
+            .From<ProjectMilestoneModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Get();
 
-        return (tasksTask.Result.Models, projectTask.Result);
+        await Task.WhenAll(tasksTask, projectTask, milestonesTask);
+
+        return (tasksTask.Result.Models, projectTask.Result, milestonesTask.Result.Models.Count);
     }
 
-    private static decimal Compute(List<TaskModel> tasks, ProjectModel? project)
+    private static decimal Compute(List<TaskModel> tasks, ProjectModel? project, int milestoneCount)
     {
         var evaluated = tasks.Where(t => t.Status == "evaluated").ToList();
-        var total = CompletionPts(evaluated) + DepthPts(evaluated) + QualityPts(project);
+        var total = CompletionPts(evaluated)
+                  + DepthPts(evaluated)
+                  + QualityPts(project)
+                  + MilestonePts(milestoneCount);
         return Math.Min(100m, Math.Round(total, 1));
     }
 
-    // 30% — etapas concluídas
+    // 25% — etapas concluídas
     private static decimal CompletionPts(IList<TaskModel> evaluated) =>
-        (Math.Min(evaluated.Count, TotalStages) / (decimal)TotalStages) * 30m;
+        (Math.Min(evaluated.Count, TotalStages) / (decimal)TotalStages) * 25m;
 
-    // 20% — profundidade média do conteúdo (tier 0-3)
+    // 15% — profundidade média do conteúdo (tier 0-3)
     private static decimal DepthPts(IList<TaskModel> evaluated)
     {
         if (evaluated.Count == 0) return 0m;
         var avgTier = evaluated.Average(t => ContentTier(t.Content?.Length ?? 0));
-        return ((decimal)avgTier / 3m) * 20m;
+        return ((decimal)avgTier / 3m) * 15m;
     }
 
-    // 50% — qualidade IVO avaliada pelo DeepSeek (média O/M/V/E/T, escala 1-10)
+    // 40% — qualidade IVO ponderada pela categoria do projeto (Opção A)
     private static decimal QualityPts(ProjectModel? project)
     {
-        if (project == null) return 25m; // neutro: 5/10 × 50
-        var avg = (project.IvoO + project.IvoM + project.IvoV + project.IvoE + project.IvoT) / 5m;
-        return (avg / 10m) * 50m;
+        if (project == null) return 20m; // neutro: 5/10 × 40
+        var weighted = CategoryIvoWeights.WeightedIvo(
+            project.Category,
+            project.IvoO, project.IvoM, project.IvoV, project.IvoE, project.IvoT);
+        return (weighted / 10m) * 40m;
     }
+
+    // 20% — marcos únicos atingidos × 4 pts (Opção B)
+    private static decimal MilestonePts(int milestoneCount) =>
+        Math.Min(milestoneCount, MaxMilestones) * PtsPerMilestone;
 
     private static int ContentTier(int length) => length switch
     {

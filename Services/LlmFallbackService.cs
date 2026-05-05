@@ -93,10 +93,13 @@ public sealed class LlmFallbackService(
                 ? result.InputTokens + result.OutputTokens
                 : prompt.Length / 4;
 
+            var sourceTag = options?.SourceContext ?? result.ProviderName;
+            var taskId = $"{sourceTag}-{Guid.NewGuid()}";
+
             var record = new IaEvaluationModel
             {
                 Id = Guid.NewGuid().ToString(),
-                TaskId = $"{options?.SourceContext ?? result.ProviderName}-{Guid.NewGuid()}",
+                TaskId = taskId,
                 UserId = options?.UserId,
                 InputText = prompt.Length > 500 ? prompt[..500] + "…" : prompt,
                 OutputJson = null,
@@ -107,11 +110,18 @@ public sealed class LlmFallbackService(
                 CreatedAt = DateTime.UtcNow,
             };
 
+            logger.LogInformation("[LLM-Monitor] Tentando registrar tokens — provider={Provider}, source={Source}, total={Tot}t",
+                result.ProviderName, sourceTag, totalTokens);
+
             await supabase.From<IaEvaluationModel>().Insert(record);
+
+            logger.LogInformation("[LLM-Monitor] ✅ Tokens registrados (id={Id}, source={Source}, model={Model}, tokens={Tot})",
+                record.Id, sourceTag, record.ModelUsed, totalTokens);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "[LLM] Falha ao registrar tokens no monitor: {Msg}", ex.Message);
+            logger.LogError(ex, "[LLM-Monitor] ❌ Falha ao registrar tokens — provider={Provider}, ex={ExType}: {Msg}",
+                result.ProviderName, ex.GetType().Name, ex.Message);
         }
     }
 
