@@ -12,6 +12,8 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly IStageService _stageService;
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
+    private readonly IIvoService _ivoService;
+    private readonly IScoreService _scoreService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -20,6 +22,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         IStageService stageService,
         IProjectService projectService,
         IStageSummaryService stageSummaryService,
+        IIvoService ivoService,
+        IScoreService scoreService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration,
         ILlmFallbackService llmFallbackService)
@@ -29,8 +33,33 @@ public class DocumentGenerationService : IDocumentGenerationService
         _stageService = stageService;
         _projectService = projectService;
         _stageSummaryService = stageSummaryService;
+        _ivoService = ivoService;
+        _scoreService = scoreService;
         _logger = logger;
         _configuration = configuration;
+    }
+
+    /// <summary>
+    /// Reavalia o IVO da etapa recém-criada e recalcula o score do projeto.
+    /// Fire-and-forget para não bloquear a resposta da geração de documento.
+    /// </summary>
+    private async Task TriggerIvoAndScoreAsync(Guid projectId, string stage, string content)
+    {
+        try
+        {
+            var stageNum = stage.ToLower().StartsWith("etapa") && int.TryParse(stage.AsSpan(5), out var n) ? n : 0;
+            if (stageNum >= 1 && stageNum <= 5)
+            {
+                await _ivoService.EvaluateStageAsync(projectId.ToString(), stageNum, content);
+            }
+            await _ivoService.RecalculateAndPersistAsync(projectId.ToString());
+            await _scoreService.CalculateAndPersistAsync(projectId.ToString());
+            _logger.LogInformation("[DocumentGeneration] ✅ IVO + Score reavaliados para project {ProjectId} após stage {Stage}", projectId, stage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DocumentGeneration] Falha ao reavaliar IVO/Score para project {ProjectId}", projectId);
+        }
     }
 
     private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
@@ -402,6 +431,9 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Sanitizar JSON e salvar resumo da etapa
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
+        // Reavaliar IVO + Score em background (não bloquear resposta)
+        _ = TriggerIvoAndScoreAsync(projectId, stage, generatedContent);
+
         return createdTask;
     }
 
@@ -541,6 +573,9 @@ public class DocumentGenerationService : IDocumentGenerationService
 
         // Sanitizar JSON e salvar resumo da etapa
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
+
+        // Reavaliar IVO + Score em background
+        _ = TriggerIvoAndScoreAsync(projectId, stage, generatedContent);
 
         _logger.LogInformation("Document regenerated successfully for task {TaskId}", taskId);
 

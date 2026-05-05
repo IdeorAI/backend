@@ -13,10 +13,17 @@ public class IaEvaluationModel : BaseModel
     public string Id { get; set; } = null!;
 
     [Column("task_id")]
-    public string TaskId { get; set; } = null!;
+    public string? TaskId { get; set; }
 
     [Column("user_id")]
     public string? UserId { get; set; }
+
+    /// <summary>
+    /// Origem da chamada quando não há task associada
+    /// (ex: "ivo-stage1", "gopivot-eval", "deepseek-direct").
+    /// </summary>
+    [Column("source_context")]
+    public string? SourceContext { get; set; }
 
     [Column("input_text")]
     public string? InputText { get; set; }

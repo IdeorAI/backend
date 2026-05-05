@@ -94,13 +94,13 @@ public sealed class LlmFallbackService(
                 : prompt.Length / 4;
 
             var sourceTag = options?.SourceContext ?? result.ProviderName;
-            var taskId = $"{sourceTag}-{Guid.NewGuid()}";
 
             var record = new IaEvaluationModel
             {
                 Id = Guid.NewGuid().ToString(),
-                TaskId = taskId,
+                TaskId = null, // chamada não associada a uma task — usamos source_context
                 UserId = options?.UserId,
+                SourceContext = sourceTag,
                 InputText = prompt.Length > 500 ? prompt[..500] + "…" : prompt,
                 OutputJson = null,
                 ModelUsed = $"{result.ProviderName}/{result.ModelName}",
