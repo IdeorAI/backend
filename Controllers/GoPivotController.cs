@@ -1,6 +1,7 @@
 using IdeorAI.Model.DTOs;
 using IdeorAI.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace IdeorAI.Controllers;
 
@@ -9,12 +10,23 @@ namespace IdeorAI.Controllers;
 public class GoPivotController : ControllerBase
 {
     private readonly IGoPivotService _goPivotService;
+    private readonly IProjectService _projectService;
     private readonly ILogger<GoPivotController> _logger;
 
-    public GoPivotController(IGoPivotService goPivotService, ILogger<GoPivotController> logger)
+    public GoPivotController(
+        IGoPivotService goPivotService,
+        IProjectService projectService,
+        ILogger<GoPivotController> logger)
     {
         _goPivotService = goPivotService;
+        _projectService = projectService;
         _logger = logger;
+    }
+
+    private async Task<bool> CanAccessAsync(Guid projectId, Guid userId)
+    {
+        var project = await _projectService.GetByIdAsync(projectId, userId);
+        return project != null;
     }
 
     [HttpGet]
@@ -22,16 +34,21 @@ public class GoPivotController : ControllerBase
         Guid projectId,
         [FromHeader(Name = "x-user-id")] Guid userId)
     {
+        if (!await CanAccessAsync(projectId, userId)) return NotFound();
+
         var result = await _goPivotService.GetExistingAsync(projectId);
         if (result == null) return NotFound();
         return Ok(result);
     }
 
     [HttpPost]
+    [EnableRateLimiting("ai-generation")]
     public async Task<ActionResult<GoPivotResponseDto>> Evaluate(
         Guid projectId,
         [FromHeader(Name = "x-user-id")] Guid userId)
     {
+        if (!await CanAccessAsync(projectId, userId)) return NotFound();
+
         _logger.LogInformation("[GoPivot] Evaluating project {ProjectId}", projectId);
         try
         {
@@ -55,6 +72,7 @@ public class GoPivotController : ControllerBase
         [FromHeader(Name = "x-user-id")] Guid userId,
         [FromBody] GoPivotOverrideDto dto)
     {
+        if (!await CanAccessAsync(projectId, userId)) return NotFound();
         if (!dto.Confirm)
             return BadRequest(new { error = "Confirme explicitamente o override (confirm: true)." });
 

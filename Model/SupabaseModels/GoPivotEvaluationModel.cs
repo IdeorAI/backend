@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
 
@@ -10,7 +11,7 @@ public class GoPivotEvaluationModel : BaseModel
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
     [Column("project_id")]
-    public string ProjectId { get; set; } = "";
+    public string ProjectId { get; set; } = null!;
 
     [Column("verdict")]
     public string Verdict { get; set; } = "";
@@ -19,10 +20,10 @@ public class GoPivotEvaluationModel : BaseModel
     public int Confidence { get; set; }
 
     [Column("reasons")]
-    public string ReasonsJson { get; set; } = "[]";
+    public JToken Reasons { get; set; } = new JArray();
 
     [Column("pivot_recommendations")]
-    public string? PivotRecommendationsJson { get; set; }
+    public JToken? PivotRecommendations { get; set; }
 
     [Column("override")]
     public bool Override { get; set; }

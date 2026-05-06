@@ -12,8 +12,7 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly IStageService _stageService;
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
-    private readonly IIvoService _ivoService;
-    private readonly IScoreService _scoreService;
+    private readonly IBackgroundTaskRunner _bg;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -22,8 +21,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         IStageService stageService,
         IProjectService projectService,
         IStageSummaryService stageSummaryService,
-        IIvoService ivoService,
-        IScoreService scoreService,
+        IBackgroundTaskRunner backgroundTaskRunner,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration,
         ILlmFallbackService llmFallbackService)
@@ -33,33 +31,42 @@ public class DocumentGenerationService : IDocumentGenerationService
         _stageService = stageService;
         _projectService = projectService;
         _stageSummaryService = stageSummaryService;
-        _ivoService = ivoService;
-        _scoreService = scoreService;
+        _bg = backgroundTaskRunner;
         _logger = logger;
         _configuration = configuration;
     }
 
-    /// <summary>
-    /// Reavalia o IVO da etapa recém-criada e recalcula o score do projeto.
-    /// Fire-and-forget para não bloquear a resposta da geração de documento.
-    /// </summary>
-    private async Task TriggerIvoAndScoreAsync(Guid projectId, string stage, string content)
+    private static int ParseStageNumber(string? stage)
     {
-        try
+        if (string.IsNullOrEmpty(stage) || stage.Length <= 5) return 0;
+        if (!stage.StartsWith("etapa", StringComparison.OrdinalIgnoreCase)) return 0;
+        return int.TryParse(stage.AsSpan(5), out var n) ? n : 0;
+    }
+
+    /// <summary>
+    /// Reavalia IVO + Score após geração de documento.
+    /// SEQUENCIAL (await IVO → await Score) para evitar lost-update no ProjectModel.
+    /// Executa em scope DI dedicado via BackgroundTaskRunner.
+    /// </summary>
+    private void EnqueueIvoAndScore(Guid projectId, string stage, string content)
+    {
+        _bg.Run(async (sp, _) =>
         {
-            var stageNum = stage.ToLower().StartsWith("etapa") && int.TryParse(stage.AsSpan(5), out var n) ? n : 0;
-            if (stageNum >= 1 && stageNum <= 5)
+            var ivo = sp.GetRequiredService<IIvoService>();
+            var score = sp.GetRequiredService<IScoreService>();
+            var log = sp.GetRequiredService<ILogger<DocumentGenerationService>>();
+
+            var stageNum = ParseStageNumber(stage);
+            if (stageNum is >= 1 and <= 5)
             {
-                await _ivoService.EvaluateStageAsync(projectId.ToString(), stageNum, content);
+                await ivo.EvaluateStageAsync(projectId.ToString(), stageNum, content);
             }
-            await _ivoService.RecalculateAndPersistAsync(projectId.ToString());
-            await _scoreService.CalculateAndPersistAsync(projectId.ToString());
-            _logger.LogInformation("[DocumentGeneration] ✅ IVO + Score reavaliados para project {ProjectId} após stage {Stage}", projectId, stage);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[DocumentGeneration] Falha ao reavaliar IVO/Score para project {ProjectId}", projectId);
-        }
+            await ivo.RecalculateAndPersistAsync(projectId.ToString());
+            await score.CalculateAndPersistAsync(projectId.ToString());
+
+            log.LogInformation("[DocumentGeneration] ✅ IVO+Score reavaliados sequencialmente para project {ProjectId} stage {Stage}",
+                projectId, stage);
+        }, $"ivo-score-{stage}");
     }
 
     private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
@@ -431,8 +438,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Sanitizar JSON e salvar resumo da etapa
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
-        // Reavaliar IVO + Score em background (não bloquear resposta)
-        _ = TriggerIvoAndScoreAsync(projectId, stage, generatedContent);
+        // Reavaliar IVO + Score em background (sequencial, scope dedicado)
+        EnqueueIvoAndScore(projectId, stage, generatedContent);
 
         return createdTask;
     }
@@ -574,8 +581,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         // Sanitizar JSON e salvar resumo da etapa
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
-        // Reavaliar IVO + Score em background
-        _ = TriggerIvoAndScoreAsync(projectId, stage, generatedContent);
+        // Reavaliar IVO + Score em background (sequencial, scope dedicado)
+        EnqueueIvoAndScore(projectId, stage, generatedContent);
 
         _logger.LogInformation("Document regenerated successfully for task {TaskId}", taskId);
 
@@ -769,28 +776,35 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
     }
 
     /// <summary>
-    /// Sanitiza input do usuário para prevenir prompt injection
-    /// Remove caracteres de controle, sequências suspeitas e limita comprimento
+    /// Sanitiza input do usuário para prevenir prompt injection.
+    /// 1) Trunca; 2) remove sequências de controle e tokens de role conhecidos
+    /// (case-insensitive); 3) chamadores devem envolver o resultado em delimitadores
+    /// XML (&lt;user_input&gt;...&lt;/user_input&gt;) ao montar o prompt.
     /// </summary>
     private string SanitizeInput(string input)
     {
         if (string.IsNullOrEmpty(input))
             return string.Empty;
-        
-        // Limitar comprimento
+
         if (input.Length > MaxInputLength)
             input = input.Substring(0, MaxInputLength);
-        
-        // Remover sequências suspeitas que podem indicar prompt injection
-        input = input.Replace("```", "")
-                     .Replace("System:", "")
-                     .Replace("Instruction:", "")
-                     .Replace("Ignore previous", "")
-                     .Replace("ignore previous", "")
-                     .Replace("System instruction", "")
-                     .Replace("Override", "")
-                     .Replace("override", "");
-        
+
+        // Remover code fences e tokens de papel (system / assistant / user)
+        var patterns = new[]
+        {
+            "```", "</user_input>", "<user_input>",
+            "System:", "system:", "SYSTEM:",
+            "Assistant:", "assistant:",
+            "Instruction:", "instruction:",
+            "Ignore previous", "ignore previous", "IGNORE PREVIOUS",
+            "Ignore all previous", "ignore all previous",
+            "System instruction", "system instruction",
+            "[[SYSTEM]]", "[INST]", "[/INST]",
+            "Override", "override",
+        };
+        foreach (var p in patterns)
+            input = input.Replace(p, "");
+
         return input.Trim();
     }
 }

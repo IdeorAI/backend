@@ -44,7 +44,7 @@ public sealed class LlmFallbackService(
                     result.ProviderName, result.ModelName, result.InputTokens, result.OutputTokens, result.DurationMs);
 
                 if (options?.SkipCentralMetrics != true)
-                    _ = RecordTokenUsageAsync(result, options, prompt);
+                    _ = RecordTokenUsageAsync(result, options, prompt, ct);
 
                 return result;
             }
@@ -85,7 +85,7 @@ public sealed class LlmFallbackService(
             errors.AsReadOnly());
     }
 
-    private async Task RecordTokenUsageAsync(LlmResult result, LlmOptions? options, string prompt)
+    private async Task RecordTokenUsageAsync(LlmResult result, LlmOptions? options, string prompt, CancellationToken ct)
     {
         try
         {
@@ -113,7 +113,7 @@ public sealed class LlmFallbackService(
             logger.LogInformation("[LLM-Monitor] Tentando registrar tokens — provider={Provider}, source={Source}, total={Tot}t",
                 result.ProviderName, sourceTag, totalTokens);
 
-            await supabase.From<IaEvaluationModel>().Insert(record);
+            await supabase.From<IaEvaluationModel>().Insert(record, cancellationToken: ct);
 
             logger.LogInformation("[LLM-Monitor] ✅ Tokens registrados (id={Id}, source={Source}, model={Model}, tokens={Tot})",
                 record.Id, sourceTag, record.ModelUsed, totalTokens);

@@ -91,9 +91,9 @@ public class GoPivotService : IGoPivotService
             ProjectId = projectId.ToString(),
             Verdict = parsed.Verdict,
             Confidence = parsed.Confidence,
-            ReasonsJson = JsonSerializer.Serialize(parsed.Reasons),
-            PivotRecommendationsJson = parsed.PivotRecommendations != null
-                ? JsonSerializer.Serialize(parsed.PivotRecommendations)
+            Reasons = Newtonsoft.Json.Linq.JArray.FromObject(parsed.Reasons),
+            PivotRecommendations = parsed.PivotRecommendations != null
+                ? Newtonsoft.Json.Linq.JArray.FromObject(parsed.PivotRecommendations)
                 : null,
         };
 
@@ -179,12 +179,12 @@ public class GoPivotService : IGoPivotService
         EvaluationId = Guid.Parse(m.Id),
         Verdict = m.Verdict,
         Confidence = m.Confidence,
-        Reasons = string.IsNullOrEmpty(m.ReasonsJson)
-            ? []
-            : JsonSerializer.Deserialize<List<string>>(m.ReasonsJson) ?? [],
-        PivotRecommendations = string.IsNullOrEmpty(m.PivotRecommendationsJson)
-            ? null
-            : JsonSerializer.Deserialize<List<string>>(m.PivotRecommendationsJson),
+        Reasons = m.Reasons is Newtonsoft.Json.Linq.JArray rArr
+            ? rArr.Select(t => t?.ToString() ?? "").ToList()
+            : [],
+        PivotRecommendations = m.PivotRecommendations is Newtonsoft.Json.Linq.JArray pArr
+            ? pArr.Select(t => t?.ToString() ?? "").ToList()
+            : null,
         Override = m.Override,
         FromCache = fromCache,
         CreatedAt = m.CreatedAt,

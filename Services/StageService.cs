@@ -13,8 +13,7 @@ public class StageService : IStageService
 {
     private readonly Supabase.Client _supabase;
     private readonly IProjectService _projectService;
-    private readonly IScoreService _scoreService;
-    private readonly IIvoService _ivoService;
+    private readonly IBackgroundTaskRunner _bg;
     private readonly ILogger<StageService> _logger;
 
     // Definição das 7 etapas da Fase Projeto
@@ -32,15 +31,31 @@ public class StageService : IStageService
     public StageService(
         Supabase.Client supabase,
         IProjectService projectService,
-        IScoreService scoreService,
-        IIvoService ivoService,
+        IBackgroundTaskRunner backgroundTaskRunner,
         ILogger<StageService> logger)
     {
         _supabase = supabase;
         _projectService = projectService;
-        _scoreService = scoreService;
-        _ivoService = ivoService;
+        _bg = backgroundTaskRunner;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// IVO + Score sequencialmente (evita lost-update no ProjectModel) com scope DI dedicado.
+    /// </summary>
+    private void EnqueueIvoAndScore(Guid projectId, int? stageNumber, string content)
+    {
+        _bg.Run(async (sp, _) =>
+        {
+            var ivo = sp.GetRequiredService<IIvoService>();
+            var score = sp.GetRequiredService<IScoreService>();
+
+            if (stageNumber.HasValue && !string.IsNullOrWhiteSpace(content))
+                await ivo.EvaluateStageAsync(projectId.ToString(), stageNumber.Value, content);
+
+            await ivo.RecalculateAndPersistAsync(projectId.ToString());
+            await score.CalculateAndPersistAsync(projectId.ToString());
+        }, $"stage-evaluated-{projectId}");
     }
 
     public async Task<ProjectTask?> CreateTaskAsync(Guid projectId, Guid userId, ProjectTask task)
@@ -85,27 +100,10 @@ public class StageService : IStageService
 
         _logger.LogInformation("Task {TaskId} created successfully", task.Id);
 
-        // Recalcular score e IVO quando task já vem com status evaluated (ex: DocumentGenerationService)
+        // Recalcular IVO + Score sequencialmente quando a task vem evaluated
         if (task.Status == "evaluated")
         {
-            _ = _scoreService.CalculateAndPersistAsync(projectId.ToString());
-
-            // Fire-and-forget: avaliar variáveis IVO via Gemini para esta etapa
-            var stageNum = ParseStageNumber(task.Phase);
-            var content = task.Content ?? "";
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    if (stageNum.HasValue && !string.IsNullOrWhiteSpace(content))
-                        await _ivoService.EvaluateStageAsync(projectId.ToString(), stageNum.Value, content);
-                    await _ivoService.RecalculateAndPersistAsync(projectId.ToString());
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "IVO background evaluation failed for project {ProjectId}", projectId);
-                }
-            });
+            EnqueueIvoAndScore(projectId, ParseStageNumber(task.Phase), task.Content ?? "");
         }
 
         return task;
@@ -212,23 +210,7 @@ public class StageService : IStageService
         // Recalcular score e IVO quando task é atualizada com status evaluated (ex: regeneração)
         if (task.Status == "evaluated")
         {
-            _ = _scoreService.CalculateAndPersistAsync(task.ProjectId.ToString());
-
-            var stageNum = ParseStageNumber(task.Phase);
-            var content = task.Content ?? "";
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    if (stageNum.HasValue && !string.IsNullOrWhiteSpace(content))
-                        await _ivoService.EvaluateStageAsync(task.ProjectId.ToString(), stageNum.Value, content);
-                    await _ivoService.RecalculateAndPersistAsync(task.ProjectId.ToString());
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "IVO background evaluation failed for project {ProjectId}", task.ProjectId);
-                }
-            });
+            EnqueueIvoAndScore(task.ProjectId, ParseStageNumber(task.Phase), task.Content ?? "");
         }
 
         return task;
@@ -251,10 +233,15 @@ public class StageService : IStageService
             task.Status = newStatus;
         });
 
-        // Recalcular score quando task é avaliada
+        // Recalcular score quando task é avaliada (scope dedicado)
         if (updated != null && newStatus == "evaluated")
         {
-            _ = _scoreService.CalculateAndPersistAsync(updated.ProjectId.ToString());
+            var pid = updated.ProjectId;
+            _bg.Run(async (sp, _) =>
+            {
+                var score = sp.GetRequiredService<IScoreService>();
+                await score.CalculateAndPersistAsync(pid.ToString());
+            }, $"score-{pid}");
         }
 
         return updated;

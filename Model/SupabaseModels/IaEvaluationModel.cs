@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
 
@@ -29,10 +30,11 @@ public class IaEvaluationModel : BaseModel
     public string? InputText { get; set; }
 
     /// <summary>
-    /// Armazenado como string JSON para evitar problemas de serialização com Newtonsoft.Json
+    /// JSON estruturado da resposta. Coluna jsonb — usar JToken evita
+    /// erro 22P02 de string crua não-JSON.
     /// </summary>
     [Column("output_json")]
-    public string? OutputJson { get; set; }
+    public JToken? OutputJson { get; set; }
 
     [Column("model_used")]
     public string? ModelUsed { get; set; }

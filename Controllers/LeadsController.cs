@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using IdeorAI.Api.Model;
 using IdeorAI.Api.Services;
 
@@ -28,6 +29,7 @@ public class LeadsController : ControllerBase
     /// <param name="lead">Dados do lead (nome, email, telefone)</param>
     /// <returns>Resposta com sucesso ou erro</returns>
     [HttpPost]
+    [EnableRateLimiting("lead-capture")]
     [ProducesResponseType(typeof(LeadResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]

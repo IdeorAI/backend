@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using IdeorAI.Model;
 using IdeorAI.Client;
 using Microsoft.Extensions.Logging;
@@ -23,6 +24,7 @@ namespace IdeorAI.Api.Controllers
 
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("ai-generation")]
     public class BusinessIdeasController : ControllerBase
     {
         private readonly ILlmFallbackService _llmFallbackService;

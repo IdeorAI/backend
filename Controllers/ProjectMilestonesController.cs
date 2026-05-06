@@ -13,19 +13,28 @@ public class ProjectMilestonesController : ControllerBase
 {
     private readonly Supabase.Client _supabase;
     private readonly IProjectService _projectService;
-    private readonly IScoreService _scoreService;
+    private readonly IBackgroundTaskRunner _bg;
     private readonly ILogger<ProjectMilestonesController> _logger;
 
     public ProjectMilestonesController(
         Supabase.Client supabase,
         IProjectService projectService,
-        IScoreService scoreService,
+        IBackgroundTaskRunner backgroundTaskRunner,
         ILogger<ProjectMilestonesController> logger)
     {
         _supabase = supabase;
         _projectService = projectService;
-        _scoreService = scoreService;
+        _bg = backgroundTaskRunner;
         _logger = logger;
+    }
+
+    private void EnqueueScoreRecalc(Guid projectId)
+    {
+        _bg.Run(async (sp, _) =>
+        {
+            var score = sp.GetRequiredService<IScoreService>();
+            await score.CalculateAndPersistAsync(projectId.ToString());
+        }, $"milestone-score-{projectId}");
     }
 
     public record MilestoneRequest(string MilestoneKey, string Title, string? Description);
@@ -83,7 +92,7 @@ public class ProjectMilestonesController : ControllerBase
 
         await _supabase.From<ProjectMilestoneModel>().Insert(record);
 
-        _ = _scoreService.CalculateAndPersistAsync(projectId.ToString());
+        EnqueueScoreRecalc(projectId);
 
         _logger.LogInformation("Milestone {Key} created for project {ProjectId}", record.MilestoneKey, projectId);
         return Created($"/api/projects/{projectId}/milestones/{record.Id}", record);
@@ -105,7 +114,7 @@ public class ProjectMilestonesController : ControllerBase
             .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
             .Delete();
 
-        _ = _scoreService.CalculateAndPersistAsync(projectId.ToString());
+        EnqueueScoreRecalc(projectId);
 
         return NoContent();
     }

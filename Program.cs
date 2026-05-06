@@ -69,6 +69,7 @@ builder.Services.AddScoped<IPdfExportService, PdfExportService>();
 builder.Services.AddScoped<IStageSummaryService, StageSummaryService>();
 builder.Services.AddScoped<IScoreService, ScoreService>();
 builder.Services.AddScoped<IIvoService, IvoService>();
+builder.Services.AddSingleton<IBackgroundTaskRunner, BackgroundTaskRunner>();
 builder.Services.AddScoped<IGoPivotService, GoPivotService>();
 
 // Configuração do OpenTelemetry
@@ -316,56 +317,59 @@ builder.Services.AddHttpClient<HubSpotService>(client =>
 });
 
 
-// CORS - Configuração ajustada para Vercel + Render
+// CORS — allowlist literal (defesa em profundidade)
 const string FrontendCors = "FrontendCors";
+var configuredOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+
+var defaultOrigins = new[]
+{
+    "https://www.ideorai.com",
+    "https://ideorai.com",
+    "http://localhost:3000",
+    "http://localhost:3001",
+};
+
+var allowedOrigins = configuredOrigins.Length > 0
+    ? configuredOrigins.Concat(defaultOrigins).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+    : defaultOrigins;
+
+// Vercel preview: aceita só origens cujo prefixo foi explicitamente cadastrado
+var vercelPreviewPrefixes = builder.Configuration
+    .GetSection("Cors:VercelPreviewPrefixes")
+    .Get<string[]>() ?? Array.Empty<string>();
+
+Log.Information("CORS: Allowlist com {Count} origens fixas + {PrefixCount} prefixos Vercel",
+    allowedOrigins.Length, vercelPreviewPrefixes.Length);
+
 builder.Services.AddCors(opt =>
 {
     opt.AddPolicy(FrontendCors, p =>
     {
         p.SetIsOriginAllowed(origin =>
         {
-            Log.Information("CORS: Verificando origin '{Origin}'", origin ?? "NULL");
+            if (string.IsNullOrWhiteSpace(origin)) return false;
+            if (allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)) return true;
 
-            if (string.IsNullOrWhiteSpace(origin))
+            foreach (var prefix in vercelPreviewPrefixes)
             {
-                Log.Warning("CORS: Origin vazio ou nulo - REJEITADO");
-                return false;
+                if (!string.IsNullOrWhiteSpace(prefix) &&
+                    origin.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
             }
 
-            // Permitir localhost em desenvolvimento
-            if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) ||
-                origin.StartsWith("https://localhost:", StringComparison.OrdinalIgnoreCase))
-            {
-                Log.Information("CORS: Origin localhost detectado - PERMITIDO");
-                return true;
-            }
-
-            // Permitir qualquer domínio *.vercel.app (HTTPS obrigatório)
-            if (origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
-                origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
-            {
-                Log.Information("CORS: Origin Vercel detectado - PERMITIDO");
-                return true;
-            }
-
-            // Permitir domínio de produção Hostinger (www.ideorai.com e ideorai.com)
-            if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase) ||
-                origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase) ||
-                origin.Equals("http://www.ideorai.com", StringComparison.OrdinalIgnoreCase) ||
-                origin.Equals("http://ideorai.com", StringComparison.OrdinalIgnoreCase))
-            {
-                Log.Information("CORS: Origin IdeorAI (Hostinger) detectado - PERMITIDO");
-                return true;
-            }
-
-            Log.Warning("CORS: Origin '{Origin}' não corresponde a nenhuma regra - REJEITADO", origin);
+            Log.Debug("CORS: Origin '{Origin}' rejeitado (fora da allowlist)", origin);
             return false;
         })
          .AllowAnyMethod()
-         .AllowAnyHeader()
+         .WithHeaders("Content-Type", "Authorization", "x-user-id", "x-request-id")
          .AllowCredentials()
          .WithExposedHeaders("Content-Disposition", "x-request-id")
-         .SetPreflightMaxAge(TimeSpan.FromMinutes(10)); // Cache preflight por 10 minutos
+         .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
     });
 });
 
@@ -375,21 +379,39 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHealthChecks()
     .AddCheck<LlmHealthCheck>("llm-providers", tags: ["llm", "ready"]);
 
-// Rate Limiting — 50 gerações IA por hora por usuário (configurável)
+// Rate Limiting — 50 gerações IA por hora.
+// Particiona por IP+UserId; ataques que rotacionam x-user-id ainda batem no bucket do IP.
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddPolicy("ai-generation", httpContext =>
+    string PartitionKey(HttpContext ctx)
     {
-        var userId = httpContext.Request.Headers["x-user-id"].ToString();
-        if (string.IsNullOrEmpty(userId)) userId = "anonymous";
-        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(userId, _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-        {
-            Window = TimeSpan.FromHours(1),
-            PermitLimit = builder.Configuration.GetValue<int>("RateLimiting:AiGenerationsPerHour", 50),
-            QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
-            QueueLimit = 0
-        });
-    });
+        var userId = ctx.Request.Headers["x-user-id"].ToString();
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return string.IsNullOrEmpty(userId) ? $"ip:{ip}" : $"{ip}|{userId}";
+    }
+
+    options.AddPolicy("ai-generation", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            PartitionKey(httpContext),
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                Window = TimeSpan.FromHours(1),
+                PermitLimit = builder.Configuration.GetValue<int>("RateLimiting:AiGenerationsPerHour", 50),
+                QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+
+    // Limit "lead-capture" — endpoint público sem captcha
+    options.AddPolicy("lead-capture", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                Window = TimeSpan.FromMinutes(15),
+                PermitLimit = 10,
+                QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+            }));
     options.RejectionStatusCode = 429;
     options.OnRejected = async (context, ct) =>
     {
