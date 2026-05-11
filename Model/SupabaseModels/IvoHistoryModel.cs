@@ -41,5 +41,5 @@ public class IvoHistoryModel : BaseModel
     public decimal IvoD { get; set; }
 
     [Column("recorded_at")]
-    public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset RecordedAt { get; set; } = DateTimeOffset.UtcNow;
 }

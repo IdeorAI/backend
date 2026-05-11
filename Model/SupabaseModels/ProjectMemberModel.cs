@@ -7,13 +7,13 @@ namespace IdeorAI.Model.SupabaseModels;
 public class ProjectMemberModel : BaseModel
 {
     [PrimaryKey("id", false)]
-    public string Id { get; set; } = "";
+    public string Id { get; set; } = Guid.NewGuid().ToString();
 
     [Column("project_id")]
-    public string ProjectId { get; set; } = "";
+    public string ProjectId { get; set; } = null!;
 
     [Column("user_id")]
-    public string UserId { get; set; } = "";
+    public string UserId { get; set; } = null!;
 
     [Column("role")]
     public string Role { get; set; } = "viewer"; // "viewer" | "editor"
@@ -22,7 +22,7 @@ public class ProjectMemberModel : BaseModel
     public string Status { get; set; } = "pending"; // "pending" | "accepted" | "declined"
 
     [Column("invited_by")]
-    public string InvitedBy { get; set; } = "";
+    public string InvitedBy { get; set; } = null!;
 
     [Column("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
