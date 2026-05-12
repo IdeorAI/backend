@@ -33,8 +33,10 @@ public class JwtAuthMiddleware
         "/api/health",
         "/swagger",
         "/api/leads",         // Lead capture é público
-        "/api/chat",          // Chat tem seu próprio auth via x-user-id no controller
-        "/api/businessideas"  // Geração de ideias — auth via x-user-id no controller
+        "/api/chat",          // Auth via x-user-id no controller
+        "/api/businessideas", // Auth via x-user-id no controller
+        "/api/projects",      // Auth via x-user-id em cada controller
+        "/api/documents",     // Auth via x-user-id no controller (regenerate/refine)
         // /metrics removido — protegido em produção via JWT
     ];
 
