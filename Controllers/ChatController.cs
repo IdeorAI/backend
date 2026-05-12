@@ -1,0 +1,72 @@
+using IdeorAI.Model.DTOs;
+using IdeorAI.Services.Chat;
+using Microsoft.AspNetCore.Mvc;
+using System.Text;
+using System.Text.Json;
+
+namespace IdeorAI.Controllers;
+
+[ApiController]
+[Route("api/chat")]
+public sealed class ChatController(
+    IChatService chatService,
+    ILogger<ChatController> logger) : ControllerBase
+{
+    [HttpPost]
+    public async Task PostAsync([FromBody] ChatRequest request, CancellationToken ct)
+    {
+        var userId = Request.Headers["x-user-id"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await Response.WriteAsJsonAsync(new { error = "Usuário não autenticado" }, ct);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 500)
+        {
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            await Response.WriteAsJsonAsync(new { error = "Mensagem inválida (1–500 caracteres)" }, ct);
+            return;
+        }
+
+        if (chatService.IsRateLimited(userId))
+        {
+            Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await Response.WriteAsJsonAsync(new { error = "Limite de 20 mensagens por hora atingido. Tente novamente em instantes." }, ct);
+            return;
+        }
+
+        Response.StatusCode = StatusCodes.Status200OK;
+        Response.ContentType = "text/event-stream; charset=utf-8";
+        Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["X-Accel-Buffering"] = "no";
+
+        logger.LogDebug("[ChatController] Iniciando stream para user={UserId}", userId);
+
+        try
+        {
+            await foreach (var delta in chatService.StreamAsync(request, userId, ct))
+            {
+                var json = JsonSerializer.Serialize(new { delta });
+                var line = Encoding.UTF8.GetBytes($"data: {json}\n\n");
+                await Response.Body.WriteAsync(line, ct);
+                await Response.Body.FlushAsync(ct);
+            }
+
+            var doneBytes = Encoding.UTF8.GetBytes("data: {\"done\":true}\n\n");
+            await Response.Body.WriteAsync(doneBytes, ct);
+            await Response.Body.FlushAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // cliente desconectou — normal
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[ChatController] Erro durante stream para user={UserId}", userId);
+            var errBytes = Encoding.UTF8.GetBytes("data: {\"error\":\"Erro interno\"}\n\n");
+            await Response.Body.WriteAsync(errBytes, ct);
+        }
+    }
+}

@@ -62,6 +62,7 @@ builder.Services.AddSingleton(provider =>
     new Supabase.Client(supabaseUrl, supabaseServiceKey, supabaseOptions));
 
 // Registrar serviços de negócio
+builder.Services.AddScoped<IdeorAI.Services.Chat.IChatService, IdeorAI.Services.Chat.ChatService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IStageService, StageService>();
 builder.Services.AddScoped<IDocumentGenerationService, DocumentGenerationService>();
