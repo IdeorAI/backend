@@ -73,12 +73,22 @@ public class JwtAuthMiddleware
 
             if (userId == null)
             {
-                _logger.LogWarning("JWT inválido ou expirado para path {Path}", path);
-                AddCorsHeaders(context);
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync("{\"error\":\"Token inválido ou expirado\"}");
-                return;
+                // Se não há config de validação JWT (secret + url ambos vazios),
+                // ignorar o token e tratar como legacy (x-user-id direto).
+                // Isso mantém compatibilidade enquanto as env vars do Render não estão configuradas.
+                if (string.IsNullOrWhiteSpace(_jwtSecret) && string.IsNullOrWhiteSpace(_supabaseUrl))
+                {
+                    _logger.LogDebug("Bearer token recebido mas sem config JWT — ignorando, modo legado ativo para {Path}", path);
+                }
+                else
+                {
+                    _logger.LogWarning("JWT inválido ou expirado para path {Path}", path);
+                    AddCorsHeaders(context);
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Token inválido ou expirado\"}");
+                    return;
+                }
             }
 
             // Sobrescreve x-user-id com o userId validado do JWT
