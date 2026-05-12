@@ -183,11 +183,23 @@ public class JwtAuthMiddleware
 
     private static void AddCorsHeaders(HttpContext context)
     {
+        // Espelhar a origin APENAS se passar na allowlist (defesa em profundidade
+        // contra CSRF + cookie theft via 401 responses).
         var origin = context.Request.Headers["Origin"].ToString();
-        if (!string.IsNullOrEmpty(origin))
-        {
-            context.Response.Headers["Access-Control-Allow-Origin"] = origin;
-            context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
-        }
+        if (string.IsNullOrEmpty(origin)) return;
+        if (!IsOriginAllowed(origin)) return;
+
+        context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+        context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+    }
+
+    private static bool IsOriginAllowed(string origin)
+    {
+        // Mesmos critérios da policy FrontendCors em Program.cs
+        if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
+        if (origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
+        if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
+        if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 }

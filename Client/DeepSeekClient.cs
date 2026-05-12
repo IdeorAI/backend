@@ -38,7 +38,7 @@ public sealed class DeepSeekClient(
             response = await client.PostAsJsonAsync(
                 "https://api.deepseek.com/v1/chat/completions", request, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new InvalidOperationException($"[DeepSeek] Erro de rede: {ex.Message}", ex);
         }
@@ -58,7 +58,7 @@ public sealed class DeepSeekClient(
         {
             responseBody = await response.Content.ReadAsStringAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new InvalidOperationException($"[DeepSeek] Falha ao ler resposta: {ex.Message}", ex);
         }

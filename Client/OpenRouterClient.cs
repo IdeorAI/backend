@@ -47,7 +47,7 @@ public sealed class OpenRouterClient(
                     response = await client.PostAsJsonAsync(
                         "https://openrouter.ai/api/v1/chat/completions", request, ct);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     logger.LogWarning(ex, "[OpenRouter] Erro de rede no modelo {Model}, tentando próximo", model);
                     continue;
@@ -72,7 +72,7 @@ public sealed class OpenRouterClient(
                 {
                     responseBody = await response.Content.ReadAsStringAsync(ct);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     logger.LogWarning(ex, "[OpenRouter] Falha ao ler body do modelo {Model}", model);
                     continue;
