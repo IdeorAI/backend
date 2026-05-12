@@ -50,28 +50,49 @@ public sealed class ChatService(
         var chunks = RagKnowledgeBase.Retrieve(request.Message);
         var ragContext = string.Join("\n\n---\n\n", chunks);
 
-        var stageName = request.CurrentStageIndex >= 0 && request.CurrentStageIndex < StageNames.Length
-            ? StageNames[request.CurrentStageIndex]
-            : "desconhecida";
+        var stageName = request.StageName
+            ?? (request.CurrentStageIndex >= 0 && request.CurrentStageIndex < StageNames.Length
+                ? StageNames[request.CurrentStageIndex]
+                : "desconhecida");
 
-        var systemPrompt = $"""
-            Você é o Guia IdeorAI, um assistente especializado em validação de startups.
-            Sua função é orientar empreendedores na jornada de validação da plataforma IdeorAI.
-            Responda sempre em português do Brasil, com tom encorajador e profissional.
-            Seja conciso: máximo 200 palavras por resposta, a menos que o usuário peça mais detalhes.
-            Não invente dados sobre o projeto do usuário. Não forneça conselhos jurídicos ou financeiros formais.
-            Se não souber, diga "Não tenho essa informação no momento".
+        string systemPrompt;
 
-            ## Contexto do projeto atual
-            - Nome: {request.ProjectName ?? "não informado"}
-            - Etapa atual: {request.CurrentStageIndex + 1} de 6 — {stageName}
-            - IVO Index: {(request.IvoScore.HasValue ? $"{request.IvoScore:F0}/100" : "ainda não calculado")}
-            - Score: {(request.Score.HasValue ? $"{request.Score:F0}/100" : "ainda não calculado")}
-            - Status Go/Pivot: {request.GoPivotVerdict ?? "ainda não avaliado"}
+        if (request.Mode == "refine" && !string.IsNullOrWhiteSpace(request.StageContent))
+        {
+            systemPrompt = $"""
+                Você é um especialista em validação de startups. O usuário quer refinar o conteúdo da etapa "{stageName}" do projeto "{request.ProjectName ?? "não informado"}".
 
-            ## Documentação relevante
-            {ragContext}
-            """;
+                ## Conteúdo atual da etapa
+                {request.StageContent}
+
+                ## Instruções
+                - Aplique as melhorias solicitadas pelo usuário mantendo o estilo e estrutura do conteúdo original
+                - Retorne APENAS o conteúdo completo reescrito com as melhorias, sem explicações adicionais, sem prefácio
+                - Responda em português do Brasil
+                - Mantenha a mesma extensão aproximada do original, a menos que o usuário peça para expandir ou resumir
+                """;
+        }
+        else
+        {
+            systemPrompt = $"""
+                Você é o Guia IdeorAI, um assistente especializado em validação de startups.
+                Sua função é orientar empreendedores na jornada de validação da plataforma IdeorAI.
+                Responda sempre em português do Brasil, com tom encorajador e profissional.
+                Seja conciso: máximo 200 palavras por resposta, a menos que o usuário peça mais detalhes.
+                Não invente dados sobre o projeto do usuário. Não forneça conselhos jurídicos ou financeiros formais.
+                Se não souber, diga "Não tenho essa informação no momento".
+
+                ## Contexto do projeto atual
+                - Nome: {request.ProjectName ?? "não informado"}
+                - Etapa atual: {request.CurrentStageIndex + 1} de 6 — {stageName}
+                - IVO Index: {(request.IvoScore.HasValue ? $"{request.IvoScore:F0}/100" : "ainda não calculado")}
+                - Score: {(request.Score.HasValue ? $"{request.Score:F0}/100" : "ainda não calculado")}
+                - Status Go/Pivot: {request.GoPivotVerdict ?? "ainda não avaliado"}
+
+                ## Documentação relevante
+                {ragContext}
+                """;
+        }
 
         var history = request.History
             .TakeLast(6)

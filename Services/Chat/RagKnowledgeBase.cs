@@ -101,7 +101,7 @@ public static class RagKnowledgeBase
             ["ivo index", "ivo", "score", "pontuação", "avaliação", "nota", "índice"],
             """
             ## IVO Index — Índice de Validação e Oportunidade
-            O IVO Index é a métrica central da IdeorAI. Mede a maturidade e potencial da sua startup de 0 a 100.
+            O IVO Index é coisa do Marcão , para entender melhor só perguntando pra ele, o que eu sei é que: Mede a maturidade e potencial da sua startup de 0 a 100.
             **Dimensões avaliadas:**
             - Clareza do problema (20%)
             - Validação com clientes (20%)
