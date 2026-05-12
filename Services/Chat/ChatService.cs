@@ -47,8 +47,11 @@ public sealed class ChatService(
         IncrementRateLimit(userId);
 
         var opts = deepSeekOptions.Value;
-        var chunks = RagKnowledgeBase.Retrieve(request.Message);
-        var ragContext = string.Join("\n\n---\n\n", chunks);
+
+        // RAG só é necessário no modo guia
+        var ragContext = request.Mode != "refine"
+            ? string.Join("\n\n---\n\n", RagKnowledgeBase.Retrieve(request.Message))
+            : string.Empty;
 
         var stageName = request.StageName
             ?? (request.CurrentStageIndex >= 0 && request.CurrentStageIndex < StageNames.Length
@@ -106,8 +109,8 @@ public sealed class ChatService(
         {
             model = opts.Model,
             messages = history,
-            temperature = 0.6f,
-            max_tokens = 600,
+            temperature = opts.Temperature,
+            max_tokens = opts.MaxTokens,
             stream = true
         };
 
@@ -116,7 +119,8 @@ public sealed class ChatService(
             "https://api.deepseek.com/v1/chat/completions");
         httpRequest.Content = JsonContent.Create(payload);
 
-        HttpResponseMessage response;
+        HttpResponseMessage? response = null;
+        string? connectError = null;
         try
         {
             response = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -124,47 +128,57 @@ public sealed class ChatService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "[ChatService] Falha ao conectar na DeepSeek API");
-            yield return "[ERRO] Não foi possível conectar ao assistente. Tente novamente.";
-            yield break;
+            connectError = "[ERRO] Não foi possível conectar ao assistente. Tente novamente.";
         }
 
-        if (!response.IsSuccessStatusCode)
+        if (connectError != null) { yield return connectError; yield break; }
+
+        // response não pode ser `using var` antes do try, então garantimos dispose explícito
+        try
         {
-            var err = await response.Content.ReadAsStringAsync(ct);
-            logger.LogWarning("[ChatService] DeepSeek retornou {Status}: {Err}", response.StatusCode, err[..Math.Min(200, err.Length)]);
-            yield return "[ERRO] O assistente está temporariamente indisponível.";
-            yield break;
+            if (!response!.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(ct);
+                logger.LogWarning("[ChatService] DeepSeek retornou {Status}: {Err}", response.StatusCode,
+                    err[..Math.Min(200, err.Length)]);
+                yield return "[ERRO] O assistente está temporariamente indisponível.";
+                yield break;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            while (!reader.EndOfStream && !ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct);
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (!line.StartsWith("data: ")) continue;
+
+                var data = line[6..]; // skip "data: "
+                if (data == "[DONE]") break;
+
+                string? delta = null;
+                try
+                {
+                    using var doc = JsonDocument.Parse(data);
+                    var choices = doc.RootElement.GetProperty("choices");
+                    if (choices.GetArrayLength() == 0) continue;
+                    var deltaEl = choices[0].GetProperty("delta");
+                    if (deltaEl.TryGetProperty("content", out var contentEl))
+                        delta = contentEl.GetString();
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(delta))
+                    yield return delta;
+            }
         }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-
-        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        finally
         {
-            var line = await reader.ReadLineAsync(ct);
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            if (!line.StartsWith("data: ")) continue;
-
-            var data = line["data: "..];
-            if (data == "[DONE]") break;
-
-            string? delta = null;
-            try
-            {
-                using var doc = JsonDocument.Parse(data);
-                var choices = doc.RootElement.GetProperty("choices");
-                if (choices.GetArrayLength() == 0) continue;
-                var deltaEl = choices[0].GetProperty("delta");
-                if (deltaEl.TryGetProperty("content", out var contentEl))
-                    delta = contentEl.GetString();
-            }
-            catch (JsonException)
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrEmpty(delta))
-                yield return delta;
+            response?.Dispose();
         }
 
         logger.LogDebug("[ChatService] Stream concluído para user {UserId}", userId);
