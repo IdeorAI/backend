@@ -1,6 +1,7 @@
 using IdeorAI.Client;
 using IdeorAI.Model.Entities;
 using IdeorAI.Model.SupabaseModels;
+using IdeorAI.Security;
 using System.Text.Json;
 
 namespace IdeorAI.Services;
@@ -96,8 +97,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         string stage,
         Dictionary<string, string> inputs)
     {
-        _logger.LogInformation("[DocumentGeneration] Iniciando geração para project {ProjectId}, stage {Stage}, userId {UserId}",
-            projectId, stage, userId);
+        _logger.LogInformation("[DocumentGeneration] Iniciando geração para project {ProjectId}, stage {Stage}, user {UserHash}",
+            projectId, stage, PiiScrubber.HashUserId(userId.ToString()));
 
         // Validar stage
         if (!StageTitles.ContainsKey(stage))

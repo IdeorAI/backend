@@ -1,3 +1,4 @@
+using IdeorAI.Security;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -6,16 +7,9 @@ using System.Text;
 namespace IdeorAI.Middleware;
 
 /// <summary>
-/// Middleware que valida o JWT do Supabase Auth e injeta o userId autenticado
-/// como header x-user-id para os controllers existentes.
-///
-/// Estratégia de migração gradual:
-/// 1. Se Authorization: Bearer {token} válido → usa userId do claim "sub"
-/// 2. Se token inválido → retorna 401
-/// 3. Se não há Authorization header → aceita x-user-id diretamente (modo legado)
-///
-/// IMPORTANTE: O modo legado (sem JWT) deve ser desabilitado quando o
-/// frontend for atualizado para enviar Bearer tokens.
+/// Valida JWT do Supabase Auth e injeta x-user-id nos controllers.
+/// Suporte a HS256 (JWT secret) e RS256 (JWKS).
+/// Onda 2: issuer/audience validation, JWKS lock, PII scrub em logs.
 /// </summary>
 public class JwtAuthMiddleware
 {
@@ -23,21 +17,24 @@ public class JwtAuthMiddleware
     private readonly ILogger<JwtAuthMiddleware> _logger;
     private readonly string _supabaseUrl;
     private readonly string _jwtSecret;
+    private readonly string _validIssuer;
+    private readonly string _validAudience;
     private readonly bool _requireAuth;
     private readonly IMemoryCache _cache;
     private readonly IHttpClientFactory _httpClientFactory;
 
-    // Rotas que não precisam de autenticação
+    // Semáforo para evitar thundering-herd no fetch do JWKS (#19)
+    private static readonly SemaphoreSlim _jwksLock = new(1, 1);
+
     private static readonly string[] PublicRoutes =
     [
         "/api/health",
         "/swagger",
-        "/api/leads",         // Lead capture é público
-        "/api/chat",          // Auth via x-user-id no controller
-        "/api/businessideas", // Auth via x-user-id no controller
-        "/api/projects",      // Auth via x-user-id em cada controller
-        "/api/documents",     // Auth via x-user-id no controller (regenerate/refine)
-        // /metrics removido — protegido em produção via JWT
+        "/api/leads",
+        "/api/chat",
+        "/api/businessideas",
+        "/api/projects",
+        "/api/documents",
     ];
 
     public JwtAuthMiddleware(
@@ -50,17 +47,24 @@ public class JwtAuthMiddleware
         _next = next;
         _logger = logger;
         _supabaseUrl = configuration["Supabase:Url"] ?? "";
-        _jwtSecret = configuration["Supabase:JwtSecret"] ?? "";
+        _jwtSecret   = configuration["Supabase:JwtSecret"] ?? "";
         _requireAuth = configuration.GetValue<bool>("Auth:RequireJwt", false);
         _cache = cache;
         _httpClientFactory = httpClientFactory;
+
+        // Issuer padrão Supabase: {url}/auth/v1  (#1)
+        _validIssuer   = configuration["Auth:ValidIssuer"]
+                         ?? (!string.IsNullOrWhiteSpace(_supabaseUrl)
+                             ? $"{_supabaseUrl.TrimEnd('/')}/auth/v1"
+                             : "");
+        // Audience padrão Supabase: "authenticated"  (#1)
+        _validAudience = configuration["Auth:ValidAudience"] ?? "authenticated";
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
         var path = context.Request.Path.Value ?? "";
 
-        // Ignorar rotas públicas
         if (IsPublicRoute(path))
         {
             await _next(context);
@@ -77,16 +81,13 @@ public class JwtAuthMiddleware
 
             if (userId == null)
             {
-                // Se não há config de validação JWT (secret + url ambos vazios),
-                // ignorar o token e tratar como legacy (x-user-id direto).
-                // Isso mantém compatibilidade enquanto as env vars do Render não estão configuradas.
                 if (string.IsNullOrWhiteSpace(_jwtSecret) && string.IsNullOrWhiteSpace(_supabaseUrl))
                 {
-                    _logger.LogDebug("Bearer token recebido mas sem config JWT — ignorando, modo legado ativo para {Path}", path);
+                    _logger.LogDebug("Bearer sem config JWT — modo legado ativo para {Path}", path);
                 }
                 else
                 {
-                    _logger.LogWarning("JWT inválido ou expirado para path {Path}", path);
+                    _logger.LogWarning("JWT inválido ou expirado para {Path}", path);
                     AddCorsHeaders(context);
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     context.Response.ContentType = "application/json";
@@ -94,22 +95,22 @@ public class JwtAuthMiddleware
                     return;
                 }
             }
-
-            // Sobrescreve x-user-id com o userId validado do JWT
-            context.Request.Headers["x-user-id"] = userId;
-            _logger.LogDebug("JWT validado. UserId={UserId}", userId);
+            else
+            {
+                context.Request.Headers["x-user-id"] = userId;
+                // #20 — loga hash do userId, não o UUID real
+                _logger.LogDebug("JWT validado. User={UserHash}", PiiScrubber.HashUserId(userId));
+            }
         }
         else if (_requireAuth)
         {
-            // Se Auth:RequireJwt=true, rejeitar requests sem Bearer token
-            _logger.LogWarning("Request sem Authorization header para path {Path} — rejeitado (RequireJwt=true)", path);
+            _logger.LogWarning("Request sem Authorization header para {Path} — rejeitado (RequireJwt=true)", path);
             AddCorsHeaders(context);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"error\":\"Authorization header obrigatório\"}");
             return;
         }
-        // else: modo legado — x-user-id header passado diretamente (sem validação JWT)
 
         await _next(context);
     }
@@ -118,18 +119,13 @@ public class JwtAuthMiddleware
     {
         try
         {
-            // Supabase pode usar HS256 (com JWT secret) ou RS256 (JWKS)
             if (!string.IsNullOrWhiteSpace(_jwtSecret))
-            {
                 return ValidateWithSecret(token);
-            }
 
             if (!string.IsNullOrWhiteSpace(_supabaseUrl))
-            {
                 return await ValidateWithJwks(token);
-            }
 
-            _logger.LogWarning("Nenhuma configuração de validação JWT disponível (Supabase:JwtSecret ou Supabase:Url)");
+            _logger.LogWarning("Nenhuma configuração de validação JWT (Supabase:JwtSecret ou Supabase:Url)");
             return null;
         }
         catch (Exception ex)
@@ -144,16 +140,20 @@ public class JwtAuthMiddleware
         var secretBytes = Encoding.UTF8.GetBytes(_jwtSecret);
         var handler = new JsonWebTokenHandler();
 
-        var result = handler.ValidateToken(token, new TokenValidationParameters
+        var parameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(secretBytes),
-            ValidateIssuer = false,
-            ValidateAudience = false,
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromMinutes(5)
-        });
+            ClockSkew = TimeSpan.FromMinutes(5),
+            // #1 — issuer/audience validation
+            ValidateIssuer   = !string.IsNullOrWhiteSpace(_validIssuer),
+            ValidIssuer      = _validIssuer,
+            ValidateAudience = !string.IsNullOrWhiteSpace(_validAudience),
+            ValidAudience    = _validAudience,
+        };
 
+        var result = handler.ValidateToken(token, parameters);
         if (!result.IsValid) return null;
 
         result.Claims.TryGetValue(JwtRegisteredClaimNames.Sub, out var sub);
@@ -162,30 +162,47 @@ public class JwtAuthMiddleware
 
     private async Task<string?> ValidateWithJwks(string token)
     {
+        const string cacheKey = "supabase_jwks";
         var jwksUrl = $"{_supabaseUrl.TrimEnd('/')}/auth/v1/.well-known/jwks.json";
 
-        const string cacheKey = "supabase_jwks";
+        // #19 — JWKS lock: apenas 1 fetch simultâneo, os demais aguardam o cache
         if (!_cache.TryGetValue(cacheKey, out JsonWebKeySet? jwks) || jwks == null)
         {
-            var httpClient = _httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(5);
-            var jwksResponse = await httpClient.GetStringAsync(jwksUrl);
-            jwks = new JsonWebKeySet(jwksResponse);
-            _cache.Set(cacheKey, jwks, TimeSpan.FromMinutes(5));
-            _logger.LogDebug("JWKS carregado do Supabase e cacheado por 5 minutos");
+            await _jwksLock.WaitAsync();
+            try
+            {
+                // Double-check após adquirir o lock
+                if (!_cache.TryGetValue(cacheKey, out jwks) || jwks == null)
+                {
+                    var httpClient = _httpClientFactory.CreateClient();
+                    httpClient.Timeout = TimeSpan.FromSeconds(5);
+                    var jwksJson = await httpClient.GetStringAsync(jwksUrl);
+                    jwks = new JsonWebKeySet(jwksJson);
+                    _cache.Set(cacheKey, jwks, TimeSpan.FromMinutes(10));
+                    _logger.LogDebug("JWKS carregado do Supabase e cacheado (10 min)");
+                }
+            }
+            finally
+            {
+                _jwksLock.Release();
+            }
         }
 
         var handler = new JsonWebTokenHandler();
-        var result = handler.ValidateToken(token, new TokenValidationParameters
+        var parameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKeys = jwks.GetSigningKeys(),
-            ValidateIssuer = false,
-            ValidateAudience = false,
+            IssuerSigningKeys = jwks!.GetSigningKeys(),
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromMinutes(5)
-        });
+            ClockSkew = TimeSpan.FromMinutes(5),
+            // #1 — issuer/audience validation
+            ValidateIssuer   = !string.IsNullOrWhiteSpace(_validIssuer),
+            ValidIssuer      = _validIssuer,
+            ValidateAudience = !string.IsNullOrWhiteSpace(_validAudience),
+            ValidAudience    = _validAudience,
+        };
 
+        var result = handler.ValidateToken(token, parameters);
         if (!result.IsValid) return null;
 
         result.Claims.TryGetValue(JwtRegisteredClaimNames.Sub, out var sub);
@@ -197,19 +214,14 @@ public class JwtAuthMiddleware
 
     private static void AddCorsHeaders(HttpContext context)
     {
-        // Espelhar a origin APENAS se passar na allowlist (defesa em profundidade
-        // contra CSRF + cookie theft via 401 responses).
         var origin = context.Request.Headers["Origin"].ToString();
-        if (string.IsNullOrEmpty(origin)) return;
-        if (!IsOriginAllowed(origin)) return;
-
+        if (string.IsNullOrEmpty(origin) || !IsOriginAllowed(origin)) return;
         context.Response.Headers["Access-Control-Allow-Origin"] = origin;
         context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
     }
 
     private static bool IsOriginAllowed(string origin)
     {
-        // Mesmos critérios da policy FrontendCors em Program.cs
         if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;

@@ -26,14 +26,10 @@ public class DebugController : ControllerBase
         if (!_env.IsDevelopment())
             return NotFound();
 
-        var supabaseUrl = _config["Supabase:Url"];
-        var supabaseServiceKey = _config["Supabase:ServiceRoleKey"];
-
         return Ok(new
         {
-            supabaseUrlSet = !string.IsNullOrEmpty(supabaseUrl),
-            supabaseServiceKeySet = !string.IsNullOrEmpty(supabaseServiceKey),
-            supabaseServiceKeyLength = supabaseServiceKey?.Length ?? 0,
+            supabaseUrlSet = !string.IsNullOrEmpty(_config["Supabase:Url"]),
+            supabaseServiceKeySet = !string.IsNullOrEmpty(_config["Supabase:ServiceRoleKey"]),
         });
     }
 }

@@ -32,19 +32,22 @@ namespace IdeorAI.Api.Controllers
         private readonly ILogger<BusinessIdeasController> _logger;
         private readonly IHttpClientFactory _httpFactory;
         private readonly IConfiguration _config;
+        private readonly IBackgroundTaskRunner _backgroundRunner;
 
         public BusinessIdeasController(
             ILlmFallbackService llmFallbackService,
             BackendMetrics metrics,
             ILogger<BusinessIdeasController> logger,
             IHttpClientFactory httpFactory,
-            IConfiguration config)
+            IConfiguration config,
+            IBackgroundTaskRunner backgroundRunner)
         {
             _llmFallbackService = llmFallbackService;
             _metrics = metrics;
             _logger = logger;
             _httpFactory = httpFactory;
             _config = config;
+            _backgroundRunner = backgroundRunner;
         }
 
         [HttpPost("suggest-by-segment")]
@@ -78,11 +81,9 @@ namespace IdeorAI.Api.Controllers
 
                 if (!string.IsNullOrWhiteSpace(req.ProjectId) || !string.IsNullOrWhiteSpace(req.OwnerId))
                 {
-                    _ = Task.Run(async () =>
-                    {
-                        try { await SaveSegmentIdeasToSupabaseAsync(ideas, req.ProjectId, req.OwnerId, req.Category, requestId); }
-                        catch (Exception ex) { _logger.LogError(ex, "Background save failed (suggest-by-segment) - RequestId: {RequestId}", requestId); }
-                    });
+                    _backgroundRunner.Run(
+                        (_, ct2) => SaveSegmentIdeasToSupabaseAsync(ideas, req.ProjectId, req.OwnerId, req.Category, requestId, ct2),
+                        operation: "save-segment-ideas");
                 }
 
                 return Ok(new GenerateIdeasResponse { Ideas = ideas, RequestId = requestId });
@@ -117,11 +118,9 @@ namespace IdeorAI.Api.Controllers
             {
                 var ideas = await GenerateStartupIdeasAsync(req.SeedIdea ?? "", req.SegmentDescription, ct);
 
-                _ = Task.Run(async () =>
-                {
-                    try { await SaveToSupabaseAsync(ideas, req.ProjectId, req.OwnerId, requestId); }
-                    catch (Exception ex) { _logger.LogError(ex, "Background save failed - RequestId: {RequestId}", requestId); }
-                });
+                _backgroundRunner.Run(
+                    (_, ct2) => SaveToSupabaseAsync(ideas, req.ProjectId, req.OwnerId, requestId, ct2),
+                    operation: "save-ideas");
 
                 return Ok(new { ideas, requestId, saved = false });
             }
@@ -160,7 +159,7 @@ namespace IdeorAI.Api.Controllers
                 """;
 
             var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
-            return ParseIdeasJson(result.Text, count);
+            return IdeaJsonParser.ParseIdeasJson(result.Text, count);
         }
 
         private async Task<List<string>> GenerateStartupIdeasAsync(string seedIdea, string segmentDescription, CancellationToken ct)
@@ -183,61 +182,16 @@ namespace IdeorAI.Api.Controllers
                 """;
 
             var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
-            return ParseSimpleIdeasJson(result.Text);
+            return IdeaJsonParser.ParseSimpleIdeasJson(result.Text);
         }
 
-        private static List<string> ParseIdeasJson(string raw, int expectedCount)
-        {
-            var cleaned = JsonSanitizer.ExtractJson(raw);
-            using var doc = JsonDocument.Parse(cleaned);
-            var root = doc.RootElement;
-
-            var ideas = new List<string>();
-
-            if (root.TryGetProperty("ideas", out var ideasEl))
-            {
-                foreach (var item in ideasEl.EnumerateArray())
-                {
-                    if (item.ValueKind == JsonValueKind.String)
-                    {
-                        ideas.Add(item.GetString() ?? "");
-                    }
-                    else if (item.ValueKind == JsonValueKind.Object)
-                    {
-                        var title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
-                        var subtitle = item.TryGetProperty("subtitle", out var s) ? s.GetString() ?? "" : "";
-                        ideas.Add(string.IsNullOrEmpty(subtitle) ? title : $"{title} — {subtitle}");
-                    }
-                }
-            }
-
-            return ideas;
-        }
-
-        private static List<string> ParseSimpleIdeasJson(string raw)
-        {
-            var cleaned = JsonSanitizer.ExtractJson(raw);
-            using var doc = JsonDocument.Parse(cleaned);
-            var root = doc.RootElement;
-
-            var ideas = new List<string>();
-
-            if (root.TryGetProperty("ideas", out var ideasEl))
-                foreach (var item in ideasEl.EnumerateArray())
-                    ideas.Add(item.GetString() ?? "");
-
-            return ideas;
-        }
-
-        private async Task SaveToSupabaseAsync(List<string> ideas, string? projectId, string ownerId, string requestId)
+        private async Task SaveToSupabaseAsync(List<string> ideas, string? projectId, string ownerId, string requestId, CancellationToken ct = default)
         {
             var sw = Stopwatch.StartNew();
             try
             {
                 var supabaseUrl = _config["Supabase:Url"];
-                var serviceKey = _config["Supabase:ServiceRoleKey"];
-
-                if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(serviceKey))
+                if (string.IsNullOrWhiteSpace(supabaseUrl))
                 {
                     _logger.LogError("Supabase config missing - RequestId: {RequestId}", requestId);
                     return;
@@ -254,7 +208,7 @@ namespace IdeorAI.Api.Controllers
                     Content = JsonContent.Create(payload, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })
                 };
 
-                var httpRes = await supa.SendAsync(httpReq, CancellationToken.None);
+                var httpRes = await supa.SendAsync(httpReq, ct);
                 sw.Stop();
 
                 if (!httpRes.IsSuccessStatusCode)
@@ -269,15 +223,13 @@ namespace IdeorAI.Api.Controllers
             }
         }
 
-        private async Task SaveSegmentIdeasToSupabaseAsync(List<string> ideas, string? projectId, string? ownerId, string? category, string requestId)
+        private async Task SaveSegmentIdeasToSupabaseAsync(List<string> ideas, string? projectId, string? ownerId, string? category, string requestId, CancellationToken ct = default)
         {
             var sw = Stopwatch.StartNew();
             try
             {
                 var supabaseUrl = _config["Supabase:Url"];
-                var serviceKey = _config["Supabase:ServiceRoleKey"];
-
-                if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(serviceKey))
+                if (string.IsNullOrWhiteSpace(supabaseUrl))
                 {
                     _logger.LogError("Supabase config missing (segment) - RequestId: {RequestId}", requestId);
                     return;
@@ -300,7 +252,7 @@ namespace IdeorAI.Api.Controllers
                     Content = JsonContent.Create(payload, options: new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })
                 };
 
-                var httpRes = await supa.SendAsync(httpReq, CancellationToken.None);
+                var httpRes = await supa.SendAsync(httpReq, ct);
                 sw.Stop();
 
                 if (!httpRes.IsSuccessStatusCode)
