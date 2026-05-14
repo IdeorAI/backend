@@ -239,14 +239,16 @@ public sealed class ChatService(
         var opts = deepSeekOptions.Value;
 
         var systemPrompt =
-            $"Você é um especialista em validação de startups. " +
-            $"O usuário quer refinar partes específicas da etapa \"{request.StageName}\" do projeto.\n\n" +
-            $"## Documento atual (JSON)\n{request.StageContent}\n\n" +
-            "## Regras obrigatórias\n" +
-            "1. Retorne APENAS um JSON válido: {\"changed_sections\": {\"chave\": \"conteúdo refinado\"}}\n" +
-            "2. Inclua SOMENTE as chaves efetivamente alteradas — não inclua seções não modificadas\n" +
-            "3. NÃO adicione texto, explicações ou markdown fora do JSON\n" +
-            "4. O valor de cada chave é o texto refinado completo em português do Brasil";
+            "Você é um especialista em validação de startups.\n" +
+            "RESPONDA SOMENTE COM JSON VÁLIDO. Nenhum texto antes ou depois.\n\n" +
+            $"Documento atual da etapa \"{request.StageName}\" (JSON):\n{request.StageContent}\n\n" +
+            "Formato obrigatório da resposta:\n" +
+            "{\"changed_sections\":{\"nome_da_chave\":\"conteúdo refinado completo\"}}\n\n" +
+            "Regras:\n" +
+            "- Inclua SOMENTE as chaves que foram alteradas\n" +
+            "- NÃO inclua chaves não modificadas\n" +
+            "- NÃO adicione texto, markdown, explicações ou código fora do JSON\n" +
+            "- Os valores devem ser strings em português do Brasil";
 
         var payload = new
         {
@@ -330,13 +332,29 @@ public sealed class ChatService(
     private static string ExtractJson(string raw)
     {
         var trimmed = raw.Trim();
-        if (trimmed.StartsWith("```"))
+
+        // Estratégia 1: encontrar bloco ```json ... ``` ou ``` ... ``` em qualquer posição
+        var fenceStart = trimmed.IndexOf("```", StringComparison.Ordinal);
+        if (fenceStart >= 0)
         {
-            var firstNewline = trimmed.IndexOf('\n');
-            if (firstNewline >= 0) trimmed = trimmed[(firstNewline + 1)..];
-            var lastFence = trimmed.LastIndexOf("```");
-            if (lastFence > 0) trimmed = trimmed[..lastFence].TrimEnd();
+            var afterFence = trimmed.IndexOf('\n', fenceStart);
+            if (afterFence >= 0)
+            {
+                var fenceEnd = trimmed.LastIndexOf("```");
+                if (fenceEnd > afterFence)
+                {
+                    var candidate = trimmed[(afterFence + 1)..fenceEnd].Trim();
+                    if (candidate.StartsWith('{')) return candidate;
+                }
+            }
         }
+
+        // Estratégia 2: extrair do primeiro '{' ao último '}' (robusto contra texto pré/pós JSON)
+        var firstBrace = trimmed.IndexOf('{');
+        var lastBrace = trimmed.LastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace)
+            return trimmed[firstBrace..(lastBrace + 1)];
+
         return trimmed;
     }
 }
