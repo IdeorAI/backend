@@ -230,4 +230,113 @@ public sealed class ChatService(
 
         logger.LogDebug("[ChatService] Stream concluído para user {UserId}", userId);
     }
+
+    public async Task<(Dictionary<string, string>? Sections, string? ErrorRaw)> RefineDocumentAsync(
+        RefineRequest request, string userId, CancellationToken ct)
+    {
+        IncrementRateLimit(userId);
+
+        var opts = deepSeekOptions.Value;
+
+        var systemPrompt =
+            $"Você é um especialista em validação de startups. " +
+            $"O usuário quer refinar partes específicas da etapa \"{request.StageName}\" do projeto.\n\n" +
+            $"## Documento atual (JSON)\n{request.StageContent}\n\n" +
+            "## Regras obrigatórias\n" +
+            "1. Retorne APENAS um JSON válido: {\"changed_sections\": {\"chave\": \"conteúdo refinado\"}}\n" +
+            "2. Inclua SOMENTE as chaves efetivamente alteradas — não inclua seções não modificadas\n" +
+            "3. NÃO adicione texto, explicações ou markdown fora do JSON\n" +
+            "4. O valor de cada chave é o texto refinado completo em português do Brasil";
+
+        var payload = new
+        {
+            model = opts.Model,
+            messages = new[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user",   content = request.UserFeedback }
+            },
+            temperature = opts.Temperature,
+            max_tokens = opts.MaxTokens,
+            stream = false
+        };
+
+        var client = httpClientFactory.CreateClient("DeepSeek");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsJsonAsync(
+                "https://api.deepseek.com/v1/chat/completions", payload, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "[ChatService.Refine] Falha ao conectar na DeepSeek API");
+            return (null, "connection_error");
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(ct);
+                logger.LogWarning("[ChatService.Refine] DeepSeek retornou {Status}: {Err}",
+                    response.StatusCode, err[..Math.Min(200, err.Length)]);
+                return (null, err);
+            }
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            string rawContent;
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                rawContent = doc.RootElement
+                    .GetProperty("choices")[0]
+                    .GetProperty("message")
+                    .GetProperty("content")
+                    .GetString() ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[ChatService.Refine] Falha ao parsear response da DeepSeek");
+                return (null, body);
+            }
+
+            var json = ExtractJson(rawContent);
+            try
+            {
+                using var diffDoc = JsonDocument.Parse(json);
+                if (!diffDoc.RootElement.TryGetProperty("changed_sections", out var sectionsEl))
+                {
+                    logger.LogWarning("[ChatService.Refine] 'changed_sections' ausente: {Raw}", json[..Math.Min(200, json.Length)]);
+                    return (null, json);
+                }
+
+                var sections = sectionsEl.Deserialize<Dictionary<string, string>>();
+                if (sections is null || sections.Count == 0)
+                    return (null, json);
+
+                logger.LogDebug("[ChatService.Refine] Diff OK — {Count} seção(ões) para user {UserId}",
+                    sections.Count, userId);
+                return (sections, null);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogWarning(ex, "[ChatService.Refine] JSON inválido: {Raw}", json[..Math.Min(200, json.Length)]);
+                return (null, json);
+            }
+        }
+    }
+
+    private static string ExtractJson(string raw)
+    {
+        var trimmed = raw.Trim();
+        if (trimmed.StartsWith("```"))
+        {
+            var firstNewline = trimmed.IndexOf('\n');
+            if (firstNewline >= 0) trimmed = trimmed[(firstNewline + 1)..];
+            var lastFence = trimmed.LastIndexOf("```");
+            if (lastFence > 0) trimmed = trimmed[..lastFence].TrimEnd();
+        }
+        return trimmed;
+    }
 }

@@ -3,6 +3,7 @@ using IdeorAI.Services.Chat;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace IdeorAI.Controllers;
 
@@ -98,5 +99,38 @@ public sealed class ChatController(
             var errBytes = Encoding.UTF8.GetBytes("data: {\"error\":\"Erro interno\"}\n\n");
             await Response.Body.WriteAsync(errBytes, ct);
         }
+    }
+
+    [HttpPost("refine")]
+    public async Task<IActionResult> RefineAsync([FromBody] RefineRequest request, CancellationToken ct)
+    {
+        var userId = Request.Headers["x-user-id"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(userId))
+            return Unauthorized(new { error = "Usuário não autenticado" });
+
+        if (string.IsNullOrWhiteSpace(request.UserFeedback) || request.UserFeedback.Length > 1000)
+            return BadRequest(new { error = "Feedback inválido (1–1000 caracteres)" });
+
+        if (string.IsNullOrWhiteSpace(request.StageContent))
+            return BadRequest(new { error = "Conteúdo da etapa não informado" });
+
+        if (chatService.IsRateLimited(userId))
+            return StatusCode(StatusCodes.Status429TooManyRequests,
+                new { error = "Limite de mensagens por hora atingido. Tente novamente em instantes." });
+
+        logger.LogDebug("[ChatController.Refine] user={UserId} stage={Stage}", userId, request.StageName);
+
+        var (sections, errorRaw) = await chatService.RefineDocumentAsync(request, userId, ct);
+
+        if (sections is null)
+        {
+            var raw = errorRaw ?? string.Empty;
+            var message = errorRaw == "connection_error"
+                ? "Não foi possível conectar ao assistente. Tente novamente."
+                : "A IA não retornou um diff válido. Tente reformular sua instrução.";
+            return UnprocessableEntity(new RefineErrorResponse(message, raw));
+        }
+
+        return Ok(new RefineResponse(sections));
     }
 }
