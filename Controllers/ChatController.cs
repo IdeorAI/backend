@@ -46,17 +46,47 @@ public sealed class ChatController(
 
         try
         {
+            bool sentError422 = false;
             await foreach (var delta in chatService.StreamAsync(request, userId, ct))
             {
-                var json = JsonSerializer.Serialize(new { delta });
-                var line = Encoding.UTF8.GetBytes($"data: {json}\n\n");
-                await Response.Body.WriteAsync(line, ct);
-                await Response.Body.FlushAsync(ct);
+                if (delta.StartsWith("\x02DIFF\x02"))
+                {
+                    // Refine mode: emit a single diff event with isDiff flag
+                    var diffPayload = delta[6..];
+                    using var diffDoc = System.Text.Json.JsonDocument.Parse(diffPayload);
+                    var diffJson = JsonSerializer.Serialize(new
+                    {
+                        isDiff = true,
+                        diff = diffDoc.RootElement
+                    });
+                    var diffLine = Encoding.UTF8.GetBytes($"data: {diffJson}\n\n");
+                    await Response.Body.WriteAsync(diffLine, ct);
+                    await Response.Body.FlushAsync(ct);
+                }
+                else if (delta.StartsWith("\x02ERROR422\x02"))
+                {
+                    sentError422 = true;
+                    var errorMessage = delta[10..];
+                    var errJson = JsonSerializer.Serialize(new { error422 = errorMessage });
+                    var errLine = Encoding.UTF8.GetBytes($"data: {errJson}\n\n");
+                    await Response.Body.WriteAsync(errLine, ct);
+                    await Response.Body.FlushAsync(ct);
+                }
+                else
+                {
+                    var json = JsonSerializer.Serialize(new { delta });
+                    var line = Encoding.UTF8.GetBytes($"data: {json}\n\n");
+                    await Response.Body.WriteAsync(line, ct);
+                    await Response.Body.FlushAsync(ct);
+                }
             }
 
-            var doneBytes = Encoding.UTF8.GetBytes("data: {\"done\":true}\n\n");
-            await Response.Body.WriteAsync(doneBytes, ct);
-            await Response.Body.FlushAsync(ct);
+            if (!sentError422)
+            {
+                var doneBytes = Encoding.UTF8.GetBytes("data: {\"done\":true}\n\n");
+                await Response.Body.WriteAsync(doneBytes, ct);
+                await Response.Body.FlushAsync(ct);
+            }
         }
         catch (OperationCanceledException)
         {
