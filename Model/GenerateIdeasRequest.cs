@@ -38,6 +38,10 @@ namespace IdeorAI.Model
     {
         public List<string> Ideas { get; set; } = new List<string>();
         public string RequestId { get; set; } // Adicione esta propriedade
+        /// <summary>
+        /// Nome de startup sugerido pelo LLM (2-4 palavras em português), comum a todas as ideias geradas.
+        /// </summary>
+        public string? SuggestedName { get; set; }
     }
 
 

@@ -74,7 +74,7 @@ namespace IdeorAI.Api.Controllers
                 _logger.LogInformation("Generating {Count} ideas for segment: {Segment} - RequestId: {RequestId}",
                     count, req.SegmentDescription, requestId);
 
-                var ideas = await GenerateSegmentIdeasAsync(req.SegmentDescription, count, ct);
+                var (ideas, suggestedName) = await GenerateSegmentIdeasAsync(req.SegmentDescription, count, ct);
 
                 _logger.LogInformation("Successfully generated {Count} segment ideas - RequestId: {RequestId}",
                     ideas.Count, requestId);
@@ -86,7 +86,7 @@ namespace IdeorAI.Api.Controllers
                         operation: "save-segment-ideas");
                 }
 
-                return Ok(new GenerateIdeasResponse { Ideas = ideas, RequestId = requestId });
+                return Ok(new GenerateIdeasResponse { Ideas = ideas, RequestId = requestId, SuggestedName = suggestedName });
             }
             catch (Exception ex) when (ex is IdeorAI.Client.LlmUnavailableException || (ex is InvalidOperationException && ex.Message.Contains("falharam")))
             {
@@ -140,7 +140,7 @@ namespace IdeorAI.Api.Controllers
             }
         }
 
-        private async Task<List<string>> GenerateSegmentIdeasAsync(string segmentDescription, int count, CancellationToken ct)
+        private async Task<(List<string> Ideas, string? SuggestedName)> GenerateSegmentIdeasAsync(string segmentDescription, int count, CancellationToken ct)
         {
             string segment = (segmentDescription ?? "").Trim();
             if (segment.Length > 400) segment = segment[..400];
@@ -149,7 +149,8 @@ namespace IdeorAI.Api.Controllers
                 Você é um gerador de ideias de startups.
                 Gere {{count}} ideias inovadoras para o segmento fornecido.
                 Retorne APENAS um JSON válido no formato:
-                {"ideas":[{"title":"Título curto","subtitle":"Descrição breve"}]}
+                {"suggested_name":"Nome Startup","ideas":[{"title":"Título curto","subtitle":"Descrição breve"}]}
+                O campo "suggested_name" deve ser um nome criativo, curto (2-4 palavras) em português para uma startup neste segmento.
                 Cada título deve ter no máximo 6 palavras.
                 Cada subtítulo deve ter 1-2 frases curtas.
                 Total por ideia: máximo 400 caracteres.
@@ -159,7 +160,9 @@ namespace IdeorAI.Api.Controllers
                 """;
 
             var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
-            return IdeaJsonParser.ParseIdeasJson(result.Text, count);
+            var ideas = IdeaJsonParser.ParseIdeasJson(result.Text, count);
+            var suggestedName = IdeaJsonParser.ParseSuggestedName(result.Text);
+            return (ideas, suggestedName);
         }
 
         private async Task<List<string>> GenerateStartupIdeasAsync(string seedIdea, string segmentDescription, CancellationToken ct)

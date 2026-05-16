@@ -39,4 +39,18 @@ public static class IdeaJsonParser
                 ideas.Add(item.GetString() ?? "");
         return ideas;
     }
+
+    public static string? ParseSuggestedName(string raw)
+    {
+        try
+        {
+            var cleaned = JsonSanitizer.ExtractJson(raw);
+            using var doc = JsonDocument.Parse(cleaned);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("suggested_name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                return nameEl.GetString();
+        }
+        catch { /* silently ignore — field is optional */ }
+        return null;
+    }
 }
