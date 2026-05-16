@@ -8,4 +8,6 @@ public interface IChatService
     bool IsRateLimited(string userId);
     Task<(Dictionary<string, string>? Sections, string? ErrorRaw)> RefineDocumentAsync(
         RefineRequest request, string userId, CancellationToken ct);
+    Task<(string? RefinedContent, string? ErrorRaw)> RefineSectionAsync(
+        RefineSectionRequest request, string userId, CancellationToken ct);
 }

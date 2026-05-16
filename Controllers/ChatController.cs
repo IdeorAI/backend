@@ -133,4 +133,42 @@ public sealed class ChatController(
 
         return Ok(new RefineResponse(sections));
     }
+
+    [HttpPost("refine-section")]
+    public async Task<IActionResult> RefineSectionAsync(
+        [FromBody] RefineSectionRequest request, CancellationToken ct)
+    {
+        var userId = Request.Headers["x-user-id"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(userId))
+            return Unauthorized(new { error = "Usuário não autenticado" });
+
+        if (string.IsNullOrWhiteSpace(request.UserFeedback) || request.UserFeedback.Length > 1000)
+            return BadRequest(new { error = "Feedback inválido (1–1000 caracteres)" });
+
+        if (string.IsNullOrWhiteSpace(request.SectionContent))
+            return BadRequest(new { error = "Conteúdo da seção não informado" });
+
+        if (string.IsNullOrWhiteSpace(request.SectionKey))
+            return BadRequest(new { error = "Chave da seção não informada" });
+
+        if (chatService.IsRateLimited(userId))
+            return StatusCode(StatusCodes.Status429TooManyRequests,
+                new { error = "Limite de mensagens por hora atingido. Tente novamente em instantes." });
+
+        logger.LogDebug("[ChatController.RefineSection] user={UserId} stage={Stage} section={Section}",
+            userId, request.StageName, request.SectionKey);
+
+        var (refined, errorRaw) = await chatService.RefineSectionAsync(request, userId, ct);
+
+        if (refined is null)
+        {
+            var raw = errorRaw ?? string.Empty;
+            var message = errorRaw == "connection_error"
+                ? "Não foi possível conectar ao assistente. Tente novamente."
+                : "A IA não retornou um refinamento válido. Tente reformular sua instrução.";
+            return UnprocessableEntity(new RefineErrorResponse(message, raw));
+        }
+
+        return Ok(new RefineSectionResponse(refined));
+    }
 }

@@ -12,3 +12,14 @@ public record RefineResponse(
 );
 
 public record RefineErrorResponse(string Error, string Raw);
+
+public record RefineSectionRequest(
+    string ProjectId,
+    string StageName,
+    string SectionKey,
+    string SectionTitle,
+    string SectionContent,
+    string UserFeedback
+);
+
+public record RefineSectionResponse(string RefinedContent);

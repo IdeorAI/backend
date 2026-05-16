@@ -329,6 +329,134 @@ public sealed class ChatService(
         }
     }
 
+    public async Task<(string? RefinedContent, string? ErrorRaw)> RefineSectionAsync(
+        RefineSectionRequest request, string userId, CancellationToken ct)
+    {
+        IncrementRateLimit(userId);
+
+        var opts = deepSeekOptions.Value;
+
+        var systemPrompt =
+            "Você é um especialista em validação de startups. Refine APENAS o texto da seção fornecida. " +
+            "Retorne SOMENTE o texto refinado em markdown puro (sem JSON, sem aspas, sem ```). " +
+            "Mantenha o tom e formato. Aplique apenas as melhorias solicitadas.";
+
+        var userPrompt =
+            $"Etapa: {request.StageName}\n" +
+            $"Seção: {request.SectionTitle}\n\n" +
+            "## Conteúdo atual da seção\n" +
+            $"{request.SectionContent}\n\n" +
+            "## Feedback do usuário\n" +
+            $"{request.UserFeedback}\n\n" +
+            "Retorne apenas o texto refinado em markdown puro, em português do Brasil.";
+
+        var payload = new
+        {
+            model = opts.Model,
+            messages = new[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user",   content = userPrompt }
+            },
+            temperature = opts.Temperature,
+            max_tokens = opts.MaxTokens,
+            stream = false
+        };
+
+        var client = httpClientFactory.CreateClient("DeepSeek");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsJsonAsync(
+                "https://api.deepseek.com/v1/chat/completions", payload, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "[ChatService.RefineSection] Falha ao conectar na DeepSeek API");
+            return (null, "connection_error");
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(ct);
+                logger.LogWarning("[ChatService.RefineSection] DeepSeek retornou {Status}: {Err}",
+                    response.StatusCode, err[..Math.Min(200, err.Length)]);
+                return (null, err);
+            }
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            string rawContent;
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                rawContent = doc.RootElement
+                    .GetProperty("choices")[0]
+                    .GetProperty("message")
+                    .GetProperty("content")
+                    .GetString() ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[ChatService.RefineSection] Falha ao parsear response da DeepSeek");
+                return (null, body);
+            }
+
+            var refined = CleanRefinedText(rawContent);
+            if (string.IsNullOrWhiteSpace(refined))
+            {
+                logger.LogWarning("[ChatService.RefineSection] Conteúdo refinado vazio. Raw: {Raw}",
+                    rawContent[..Math.Min(200, rawContent.Length)]);
+                return (null, rawContent);
+            }
+
+            logger.LogDebug("[ChatService.RefineSection] OK — section={Section} user={UserId}",
+                request.SectionKey, userId);
+            return (refined, null);
+        }
+    }
+
+    private static string CleanRefinedText(string raw)
+    {
+        var text = raw.Trim();
+
+        // Remove markdown code fences
+        if (text.StartsWith("```"))
+        {
+            var firstNewline = text.IndexOf('\n');
+            if (firstNewline >= 0)
+                text = text[(firstNewline + 1)..];
+            if (text.EndsWith("```"))
+                text = text[..^3];
+            text = text.Trim();
+        }
+
+        // Se a LLM retornou JSON ({"refinedContent": "..."} ou {"content": "..."}), extrair
+        if (text.StartsWith('{') && text.EndsWith('}'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                foreach (var prop in new[] { "refinedContent", "refined_content", "content", "text", "value" })
+                {
+                    if (doc.RootElement.TryGetProperty(prop, out var el) && el.ValueKind == JsonValueKind.String)
+                    {
+                        var inner = el.GetString();
+                        if (!string.IsNullOrWhiteSpace(inner)) return inner.Trim();
+                    }
+                }
+            }
+            catch (JsonException) { /* não era JSON, segue */ }
+        }
+
+        // Remove aspas envolventes
+        if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
+            text = text[1..^1];
+
+        return text.Trim();
+    }
+
     private static string ExtractJson(string raw)
     {
         var trimmed = raw.Trim();
