@@ -150,44 +150,43 @@ Retorne APENAS JSON válido.";
             ? ""
             : $"\n## Contexto\n{contextoAcumulado}\n";
 
-        return $@"Especialista em Value Proposition Canvas. Construa a proposta de valor para a startup abaixo, usando os gaps competitivos e dores identificadas no contexto.
+        return $@"Especialista em Value Proposition Canvas. Construa proposta concreta usando os gaps e dores do contexto.
 
-**Problema Validado:** {problema}{personasSection}
+**Problema:** {problema}{personasSection}
 {contextoSection}
-O `headline` deve ser específico e diferenciado — não genérico. Os `pain_relievers` devem endereçar limitações reais dos concorrentes.
+Regras: headline específico (não genérico), pain_relievers atacam limitações reais de concorrentes, valores mensuráveis quando possível.
 
-Retorne JSON:
+Retorne EXATAMENTE este JSON (todos os tópicos obrigatórios):
 ```json
 {{
   ""value_proposition_canvas"": {{
     ""customer_profile"": {{
-      ""customer_jobs"": [""[job funcional 1]"", ""[job 2]""],
-      ""pains"": [""[dor específica — ligada a concorrente]"", ""[dor 2]""],
-      ""gains"": [""[ganho mensurável 1]"", ""[ganho 2]""]
+      ""customer_jobs"": [""job funcional""],
+      ""pains"": [""dor ligada a concorrente""],
+      ""gains"": [""ganho mensurável""]
     }},
     ""value_map"": {{
-      ""products_services"": [""[funcionalidade 1]"", ""[funcionalidade 2]""],
-      ""pain_relievers"": [""[como elimina dor 1 — específico]"", ""[alivia dor 2]""],
-      ""gain_creators"": [""[entrega ganho 1]"", ""[ganho 2]""]
+      ""products_services"": [""funcionalidade""],
+      ""pain_relievers"": [""como elimina dor X""],
+      ""gain_creators"": [""entrega ganho Y""]
     }}
   }},
   ""proposta_valor_final"": {{
-    ""headline"": ""[1 frase: para [quem], [produto] que [benefício único]]"",
-    ""subheadline"": ""[2-3 frases: o quê, para quem, resultado]"",
-    ""beneficios_chave"": [""[benefício mensurável 1]"", ""[benefício 2]""],
-    ""diferenciais"": [""[diferencial vs concorrente 1]"", ""[diferencial 2]""]
+    ""headline"": ""para [quem], [produto] que [benefício único]"",
+    ""subheadline"": ""2-3 frases: o quê, para quem, resultado"",
+    ""beneficios_chave"": [""benefício mensurável""],
+    ""diferenciais"": [""diferencial vs concorrente""]
   }},
   ""posicionamento"": {{
-    ""para"": ""[público específico]"",
-    ""que"": ""[problema específico]"",
-    ""nosso_produto"": ""[categoria]"",
-    ""diferente_de"": ""[concorrentes]"",
-    ""porque"": ""[razão de diferenciação]""
+    ""para"": ""público"",
+    ""que"": ""problema"",
+    ""nosso_produto"": ""categoria"",
+    ""diferente_de"": ""concorrentes"",
+    ""porque"": ""razão""
   }}
 }}
 ```
-
-Retorne APENAS JSON válido.";
+APENAS JSON válido, sem markdown, sem prefácio.";
     }
 
     /// <summary>
@@ -202,53 +201,44 @@ Retorne APENAS JSON válido.";
             ? ""
             : $"\n## Contexto\n{contextoAcumulado}\n";
 
-        return $@"Consultor de Business Model Canvas. Construa o modelo de negócio usando as métricas de mercado e proposta de valor já definidas.
+        return $@"Consultor de Business Model Canvas. Use ticket médio e segmento do contexto para projeções realistas.
 
 **Ideia:** {ideia}
 {contextoSection}
-Use o ticket médio e segmento do contexto para tornar as projeções realistas. Inclua unit economics (CAC e LTV).
+Regras: valores em R$ específicos (não ranges), CAC/LTV obrigatórios, premissas ancoradas no mercado.
 
-Retorne JSON:
+Retorne EXATAMENTE este JSON (todos os tópicos obrigatórios):
 ```json
 {{
   ""business_model_canvas"": {{
-    ""segmentos_clientes"": [""[segmento 1]"", ""[segmento 2]""],
-    ""proposta_valor"": [""[proposta]""],
-    ""canais"": [""[canal 1]"", ""[canal 2]""],
-    ""relacionamento_clientes"": [""[tipo 1]""],
-    ""fluxos_receita"": [{{
-      ""tipo"": ""[modelo]"",
-      ""valor"": ""[R$ X]"",
-      ""frequencia"": ""mensal""
-    }}],
-    ""recursos_chave"": [""[recurso 1]"", ""[recurso 2]""],
-    ""atividades_chave"": [""[atividade 1]"", ""[atividade 2]""],
-    ""parcerias_chave"": [""[parceiro 1]""],
-    ""estrutura_custos"": [{{
-      ""categoria"": ""[categoria]"",
-      ""valor_estimado"": ""[R$ X/mês]"",
-      ""tipo"": ""fixo""
-    }}]
+    ""segmentos_clientes"": [""segmento""],
+    ""proposta_valor"": [""proposta""],
+    ""canais"": [""canal""],
+    ""relacionamento_clientes"": [""tipo""],
+    ""fluxos_receita"": [{{""tipo"":""modelo"",""valor"":""R$ X"",""frequencia"":""mensal""}}],
+    ""recursos_chave"": [""recurso""],
+    ""atividades_chave"": [""atividade""],
+    ""parcerias_chave"": [""parceiro""],
+    ""estrutura_custos"": [{{""categoria"":""nome"",""valor_estimado"":""R$ X/mês"",""tipo"":""fixo""}}]
   }},
   ""unit_economics"": {{
-    ""cac_estimado"": ""[R$ X]"",
-    ""ltv_estimado"": ""[R$ Y]"",
-    ""ltv_cac_ratio"": ""[N:1]"",
-    ""payback_periodo"": ""[N meses]""
+    ""cac_estimado"": ""R$ X"",
+    ""ltv_estimado"": ""R$ Y"",
+    ""ltv_cac_ratio"": ""N:1"",
+    ""payback_periodo"": ""N meses""
   }},
   ""projecao_financeira_simplificada"": {{
     ""ano_1"": {{
-      ""receita_mensal_media"": ""[R$ X]"",
-      ""custos_mensais"": ""[R$ Y]"",
-      ""margem_bruta"": ""[%]"",
-      ""break_even_months"": ""[N]""
+      ""receita_mensal_media"": ""R$ X"",
+      ""custos_mensais"": ""R$ Y"",
+      ""margem_bruta"": ""%"",
+      ""break_even_months"": ""N""
     }},
-    ""premissas"": [""[premissa baseada no mercado]"", ""[premissa 2]""]
+    ""premissas"": [""premissa ancorada no mercado""]
   }}
 }}
 ```
-
-Retorne APENAS JSON válido.";
+APENAS JSON válido, sem markdown, sem prefácio.";
     }
 
     /// <summary>
@@ -257,40 +247,48 @@ Retorne APENAS JSON válido.";
     public static string Etapa5MVP(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
+        var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
 
-        return $@"MVP para: {ideia}
+        var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
+            ? ""
+            : $"\n## Contexto\n{contextoAcumulado}\n";
 
-Retorne JSON:
+        return $@"Product Manager. Defina MVP enxuto para validar hipóteses centrais em 3 meses.
+
+**Ideia:** {ideia}
+{contextoSection}
+Regras: core_features máx 3-5 (cortar o que não testa hipótese), stack popular (não exótica), custos em R$ realistas para mercado BR.
+
+Retorne EXATAMENTE este JSON (todos os tópicos obrigatórios):
 ```json
 {{
   ""definicao_mvp"": {{
-    ""core_features"": [""[feature 1]"", ""[feature 2]"", ""[feature 3]""],
-    ""nice_to_have"": [""[feature opcional 1]""],
-    ""justificativa"": ""[por que essas features]""
+    ""core_features"": [""feature essencial""],
+    ""nice_to_have"": [""feature opcional""],
+    ""justificativa"": ""por que essas features""
   }},
   ""roadmap_3_meses"": [
-    {{ ""mes"": 1, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }},
-    {{ ""mes"": 2, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }},
-    {{ ""mes"": 3, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }}
+    {{""mes"":1,""objetivo"":""obj"",""entregas"":[""entrega""]}},
+    {{""mes"":2,""objetivo"":""obj"",""entregas"":[""entrega""]}},
+    {{""mes"":3,""objetivo"":""obj"",""entregas"":[""entrega""]}}
   ],
   ""metricas_validacao"": [
-    {{ ""metrica"": ""[nome]"", ""meta"": ""[valor]"", ""motivo"": ""[por que importante]"" }}
+    {{""metrica"":""nome"",""meta"":""valor"",""motivo"":""por que importa""}}
   ],
   ""stack_tecnologica"": {{
-    ""frontend"": ""[tech]"",
-    ""backend"": ""[tech]"",
-    ""database"": ""[tech]"",
-    ""infra"": ""[cloud provider]""
+    ""frontend"": ""tech"",
+    ""backend"": ""tech"",
+    ""database"": ""tech"",
+    ""infra"": ""cloud""
   }},
   ""custo_desenvolvimento"": {{
-    ""estimativa_total"": ""[R$ X]"",
-    ""tempo_estimado"": ""[N meses]"",
-    ""composicao"": [{{ ""item"": ""[item]"", ""valor"": ""[R$ Y]"" }}]
+    ""estimativa_total"": ""R$ X"",
+    ""tempo_estimado"": ""N meses"",
+    ""composicao"": [{{""item"":""item"",""valor"":""R$ Y""}}]
   }}
 }}
 ```
-
-Retorne APENAS JSON válido.";
+APENAS JSON válido, sem markdown, sem prefácio.";
     }
 
     /// <summary>
