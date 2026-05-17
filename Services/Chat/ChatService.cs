@@ -20,32 +20,60 @@ public sealed class ChatService(
 
     private const int RateLimitPerHour = 20;
 
+    // Lock global para tornar check+increment do rate-limit atômico (corrige race condition).
+    private static readonly object _rateLimitLock = new();
+
     public bool IsRateLimited(string userId)
     {
         var key = $"chat_rl_{userId}_{DateTime.UtcNow:yyyyMMddHH}";
-        var count = cache.GetOrCreate(key, e =>
+        lock (_rateLimitLock)
         {
-            e.AbsoluteExpiration = DateTimeOffset.UtcNow.AddMinutes(60 - DateTime.UtcNow.Minute);
-            return 0;
-        });
-        return count >= RateLimitPerHour;
+            cache.TryGetValue<int>(key, out var count);
+            return count >= RateLimitPerHour;
+        }
     }
 
+    /// <summary>
+    /// Check + increment atômico do rate limit. Retorna false se o usuário estourou o limite.
+    /// </summary>
+    public bool TryConsumeRateLimit(string userId)
+    {
+        var now = DateTime.UtcNow;
+        var key = $"chat_rl_{userId}_{now:yyyyMMddHH}";
+        var expiration = DateTimeOffset.UtcNow.AddMinutes(60 - now.Minute);
+
+        lock (_rateLimitLock)
+        {
+            cache.TryGetValue<int>(key, out var count);
+            if (count >= RateLimitPerHour) return false;
+            cache.Set(key, count + 1, expiration);
+            return true;
+        }
+    }
+
+    // Mantido para retrocompatibilidade da interface, mas o uso recomendado é TryConsumeRateLimit.
     private void IncrementRateLimit(string userId)
     {
-        var key = $"chat_rl_{userId}_{DateTime.UtcNow:yyyyMMddHH}";
-        cache.TryGetValue<int>(key, out var count);
-        cache.Set(key, count + 1,
-            DateTimeOffset.UtcNow.AddMinutes(60 - DateTime.UtcNow.Minute));
+        var now = DateTime.UtcNow;
+        var key = $"chat_rl_{userId}_{now:yyyyMMddHH}";
+        var expiration = DateTimeOffset.UtcNow.AddMinutes(60 - now.Minute);
+        lock (_rateLimitLock)
+        {
+            cache.TryGetValue<int>(key, out var count);
+            cache.Set(key, count + 1, expiration);
+        }
     }
+
+    // PII-safe placeholder for logs (não loga conteúdo cru da DeepSeek com prompts do usuário).
+    private static string SanitizeForLog(string s) =>
+        string.IsNullOrEmpty(s) ? "[empty]" : $"[{s.Length} chars]";
 
     public async IAsyncEnumerable<string> StreamAsync(
         ChatRequest request,
         string userId,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        IncrementRateLimit(userId);
-
+        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
         var opts = deepSeekOptions.Value;
 
         // RAG só é necessário no modo guia
@@ -145,7 +173,9 @@ public sealed class ChatService(
             if (!response!.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(ct);
-                logger.LogWarning("[ChatService] DeepSeek retornou {Status}: {Err}", response.StatusCode,
+                logger.LogWarning("[ChatService] DeepSeek retornou {Status} (errSize={Size})",
+                    response.StatusCode, SanitizeForLog(err));
+                logger.LogDebug("[ChatService] DeepSeek error body: {Err}",
                     err[..Math.Min(200, err.Length)]);
                 earlyError = "[ERRO] O assistente está temporariamente indisponível.";
             }
@@ -234,8 +264,7 @@ public sealed class ChatService(
     public async Task<(Dictionary<string, string>? Sections, string? ErrorRaw)> RefineDocumentAsync(
         RefineRequest request, string userId, CancellationToken ct)
     {
-        IncrementRateLimit(userId);
-
+        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
         var opts = deepSeekOptions.Value;
 
         var systemPrompt =
@@ -281,8 +310,10 @@ public sealed class ChatService(
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(ct);
-                logger.LogWarning("[ChatService.Refine] DeepSeek retornou {Status}: {Err}",
-                    response.StatusCode, err[..Math.Min(200, err.Length)]);
+                logger.LogWarning("[ChatService.Refine] DeepSeek retornou {Status} (errSize={Size})",
+                    response.StatusCode, SanitizeForLog(err));
+                logger.LogDebug("[ChatService.Refine] DeepSeek error body: {Err}",
+                    err[..Math.Min(200, err.Length)]);
                 return (null, err);
             }
 
@@ -309,7 +340,8 @@ public sealed class ChatService(
                 using var diffDoc = JsonDocument.Parse(json);
                 if (!diffDoc.RootElement.TryGetProperty("changed_sections", out var sectionsEl))
                 {
-                    logger.LogWarning("[ChatService.Refine] 'changed_sections' ausente: {Raw}", json[..Math.Min(200, json.Length)]);
+                    logger.LogWarning("[ChatService.Refine] 'changed_sections' ausente (jsonSize={Size})", SanitizeForLog(json));
+                    logger.LogDebug("[ChatService.Refine] JSON sem changed_sections: {Raw}", json[..Math.Min(200, json.Length)]);
                     return (null, json);
                 }
 
@@ -323,7 +355,8 @@ public sealed class ChatService(
             }
             catch (JsonException ex)
             {
-                logger.LogWarning(ex, "[ChatService.Refine] JSON inválido: {Raw}", json[..Math.Min(200, json.Length)]);
+                logger.LogWarning(ex, "[ChatService.Refine] JSON inválido (jsonSize={Size})", SanitizeForLog(json));
+                logger.LogDebug("[ChatService.Refine] Conteúdo JSON inválido: {Raw}", json[..Math.Min(200, json.Length)]);
                 return (null, json);
             }
         }
@@ -332,8 +365,7 @@ public sealed class ChatService(
     public async Task<(string? RefinedContent, string? ErrorRaw)> RefineSectionAsync(
         RefineSectionRequest request, string userId, CancellationToken ct)
     {
-        IncrementRateLimit(userId);
-
+        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
         var opts = deepSeekOptions.Value;
 
         var systemPrompt =
@@ -381,8 +413,10 @@ public sealed class ChatService(
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(ct);
-                logger.LogWarning("[ChatService.RefineSection] DeepSeek retornou {Status}: {Err}",
-                    response.StatusCode, err[..Math.Min(200, err.Length)]);
+                logger.LogWarning("[ChatService.RefineSection] DeepSeek retornou {Status} (errSize={Size})",
+                    response.StatusCode, SanitizeForLog(err));
+                logger.LogDebug("[ChatService.RefineSection] DeepSeek error body: {Err}",
+                    err[..Math.Min(200, err.Length)]);
                 return (null, err);
             }
 
@@ -406,7 +440,9 @@ public sealed class ChatService(
             var refined = CleanRefinedText(rawContent);
             if (string.IsNullOrWhiteSpace(refined))
             {
-                logger.LogWarning("[ChatService.RefineSection] Conteúdo refinado vazio. Raw: {Raw}",
+                logger.LogWarning("[ChatService.RefineSection] Conteúdo refinado vazio (rawSize={Size})",
+                    SanitizeForLog(rawContent));
+                logger.LogDebug("[ChatService.RefineSection] Raw content: {Raw}",
                     rawContent[..Math.Min(200, rawContent.Length)]);
                 return (null, rawContent);
             }

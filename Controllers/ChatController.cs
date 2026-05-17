@@ -11,13 +11,41 @@ namespace IdeorAI.Controllers;
 [Route("api/chat")]
 public sealed class ChatController(
     IChatService chatService,
+    IConfiguration configuration,
     ILogger<ChatController> logger) : ControllerBase
 {
+    /// <summary>
+    /// Resolve o userId a partir do JWT (via x-user-id injetado pelo JwtAuthMiddleware após validação).
+    /// Rejeita requests sem Authorization Bearer válido em produção (Auth:RequireJwt=true).
+    /// Se o cliente enviar x-user-id manualmente sem Bearer e RequireJwt for true, o middleware já barrou.
+    /// </summary>
+    private (string? UserId, IActionResult? Error) ResolveAuthenticatedUser()
+    {
+        var requireJwt = configuration.GetValue<bool>("Auth:RequireJwt", false);
+        var authHeader = Request.Headers.Authorization.FirstOrDefault();
+        var hasBearer = !string.IsNullOrWhiteSpace(authHeader)
+                        && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+
+        var userId = Request.Headers["x-user-id"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(userId))
+            return (null, Unauthorized(new { error = "Usuário não autenticado" }));
+
+        // Em produção, exigir que o middleware tenha validado um JWT real.
+        // Sem Bearer, o x-user-id veio direto do cliente → não confiável.
+        if (requireJwt && !hasBearer)
+        {
+            logger.LogWarning("[ChatController] x-user-id sem Bearer token — rejeitado");
+            return (null, Unauthorized(new { error = "Token de autenticação ausente" }));
+        }
+
+        return (userId, null);
+    }
+
     [HttpPost]
     public async Task PostAsync([FromBody] ChatRequest request, CancellationToken ct)
     {
-        var userId = Request.Headers["x-user-id"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(userId))
+        var (userId, authErr) = ResolveAuthenticatedUser();
+        if (authErr != null)
         {
             Response.StatusCode = StatusCodes.Status401Unauthorized;
             await Response.WriteAsJsonAsync(new { error = "Usuário não autenticado" }, ct);
@@ -31,7 +59,7 @@ public sealed class ChatController(
             return;
         }
 
-        if (chatService.IsRateLimited(userId))
+        if (!chatService.TryConsumeRateLimit(userId!))
         {
             Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await Response.WriteAsJsonAsync(new { error = "Limite de 20 mensagens por hora atingido. Tente novamente em instantes." }, ct);
@@ -104,9 +132,8 @@ public sealed class ChatController(
     [HttpPost("refine")]
     public async Task<IActionResult> RefineAsync([FromBody] RefineRequest request, CancellationToken ct)
     {
-        var userId = Request.Headers["x-user-id"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(userId))
-            return Unauthorized(new { error = "Usuário não autenticado" });
+        var (userId, authErr) = ResolveAuthenticatedUser();
+        if (authErr != null) return authErr;
 
         if (string.IsNullOrWhiteSpace(request.UserFeedback) || request.UserFeedback.Length > 1000)
             return BadRequest(new { error = "Feedback inválido (1–1000 caracteres)" });
@@ -114,7 +141,7 @@ public sealed class ChatController(
         if (string.IsNullOrWhiteSpace(request.StageContent))
             return BadRequest(new { error = "Conteúdo da etapa não informado" });
 
-        if (chatService.IsRateLimited(userId))
+        if (!chatService.TryConsumeRateLimit(userId!))
             return StatusCode(StatusCodes.Status429TooManyRequests,
                 new { error = "Limite de mensagens por hora atingido. Tente novamente em instantes." });
 
@@ -138,9 +165,8 @@ public sealed class ChatController(
     public async Task<IActionResult> RefineSectionAsync(
         [FromBody] RefineSectionRequest request, CancellationToken ct)
     {
-        var userId = Request.Headers["x-user-id"].FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(userId))
-            return Unauthorized(new { error = "Usuário não autenticado" });
+        var (userId, authErr) = ResolveAuthenticatedUser();
+        if (authErr != null) return authErr;
 
         if (string.IsNullOrWhiteSpace(request.UserFeedback) || request.UserFeedback.Length > 1000)
             return BadRequest(new { error = "Feedback inválido (1–1000 caracteres)" });
@@ -151,7 +177,7 @@ public sealed class ChatController(
         if (string.IsNullOrWhiteSpace(request.SectionKey))
             return BadRequest(new { error = "Chave da seção não informada" });
 
-        if (chatService.IsRateLimited(userId))
+        if (!chatService.TryConsumeRateLimit(userId!))
             return StatusCode(StatusCodes.Status429TooManyRequests,
                 new { error = "Limite de mensagens por hora atingido. Tente novamente em instantes." });
 
