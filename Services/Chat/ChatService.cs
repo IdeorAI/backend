@@ -12,13 +12,14 @@ namespace IdeorAI.Services.Chat;
 public sealed class ChatService(
     IHttpClientFactory httpClientFactory,
     IOptions<DeepSeekOptions> deepSeekOptions,
+    IOptions<ChatOptions> chatOptions,
     IMemoryCache cache,
     ILogger<ChatService> logger) : IChatService
 {
     private static readonly string[] StageNames =
         ["Início", "Problema", "Pesquisa", "Proposta de Valor", "Modelo de Negócio", "MVP"];
 
-    private const int RateLimitPerHour = 20;
+    private int RateLimitPerHour => chatOptions.Value.RateLimitPerHour;
 
     // Lock global para tornar check+increment do rate-limit atômico (corrige race condition).
     private static readonly object _rateLimitLock = new();
@@ -142,7 +143,7 @@ public sealed class ChatService(
 
         var client = httpClientFactory.CreateClient("DeepSeek");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post,
-            "https://api.deepseek.com/v1/chat/completions");
+            opts.BaseUrl + "/v1/chat/completions");
         httpRequest.Content = JsonContent.Create(payload);
 
         HttpResponseMessage? response = null;
@@ -261,127 +262,16 @@ public sealed class ChatService(
         logger.LogDebug("[ChatService] Stream concluído para user {UserId}", userId);
     }
 
-    public async Task<(Dictionary<string, string>? Sections, string? ErrorRaw)> RefineDocumentAsync(
-        RefineRequest request, string userId, CancellationToken ct)
+    /// <summary>
+    /// Helper privado: monta o payload, faz POST não-streaming para a DeepSeek e
+    /// retorna o content textual da primeira choice. Centraliza error handling e logging.
+    /// </summary>
+    private async Task<(string? Content, int? StatusCode, string? ErrorBody)> CallDeepSeekAsync(
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken ct)
     {
-        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
         var opts = deepSeekOptions.Value;
-
-        var systemPrompt =
-            "Você é um especialista em validação de startups.\n" +
-            "RESPONDA SOMENTE COM JSON VÁLIDO. Nenhum texto antes ou depois.\n\n" +
-            $"Documento atual da etapa \"{request.StageName}\" (JSON):\n{request.StageContent}\n\n" +
-            "Formato obrigatório da resposta:\n" +
-            "{\"changed_sections\":{\"nome_da_chave\":\"conteúdo refinado completo\"}}\n\n" +
-            "Regras:\n" +
-            "- Inclua SOMENTE as chaves que foram alteradas\n" +
-            "- NÃO inclua chaves não modificadas\n" +
-            "- NÃO adicione texto, markdown, explicações ou código fora do JSON\n" +
-            "- Os valores devem ser strings em português do Brasil";
-
-        var payload = new
-        {
-            model = opts.Model,
-            messages = new[]
-            {
-                new { role = "system", content = systemPrompt },
-                new { role = "user",   content = request.UserFeedback }
-            },
-            temperature = opts.Temperature,
-            max_tokens = opts.MaxTokens,
-            stream = false
-        };
-
-        var client = httpClientFactory.CreateClient("DeepSeek");
-        HttpResponseMessage response;
-        try
-        {
-            response = await client.PostAsJsonAsync(
-                "https://api.deepseek.com/v1/chat/completions", payload, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "[ChatService.Refine] Falha ao conectar na DeepSeek API");
-            return (null, "connection_error");
-        }
-
-        using (response)
-        {
-            if (!response.IsSuccessStatusCode)
-            {
-                var err = await response.Content.ReadAsStringAsync(ct);
-                logger.LogWarning("[ChatService.Refine] DeepSeek retornou {Status} (errSize={Size})",
-                    response.StatusCode, SanitizeForLog(err));
-                logger.LogDebug("[ChatService.Refine] DeepSeek error body: {Err}",
-                    err[..Math.Min(200, err.Length)]);
-                return (null, err);
-            }
-
-            var body = await response.Content.ReadAsStringAsync(ct);
-            string rawContent;
-            try
-            {
-                using var doc = JsonDocument.Parse(body);
-                rawContent = doc.RootElement
-                    .GetProperty("choices")[0]
-                    .GetProperty("message")
-                    .GetProperty("content")
-                    .GetString() ?? string.Empty;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "[ChatService.Refine] Falha ao parsear response da DeepSeek");
-                return (null, body);
-            }
-
-            var json = ExtractJson(rawContent);
-            try
-            {
-                using var diffDoc = JsonDocument.Parse(json);
-                if (!diffDoc.RootElement.TryGetProperty("changed_sections", out var sectionsEl))
-                {
-                    logger.LogWarning("[ChatService.Refine] 'changed_sections' ausente (jsonSize={Size})", SanitizeForLog(json));
-                    logger.LogDebug("[ChatService.Refine] JSON sem changed_sections: {Raw}", json[..Math.Min(200, json.Length)]);
-                    return (null, json);
-                }
-
-                var sections = sectionsEl.Deserialize<Dictionary<string, string>>();
-                if (sections is null || sections.Count == 0)
-                    return (null, json);
-
-                logger.LogDebug("[ChatService.Refine] Diff OK — {Count} seção(ões) para user {UserId}",
-                    sections.Count, userId);
-                return (sections, null);
-            }
-            catch (JsonException ex)
-            {
-                logger.LogWarning(ex, "[ChatService.Refine] JSON inválido (jsonSize={Size})", SanitizeForLog(json));
-                logger.LogDebug("[ChatService.Refine] Conteúdo JSON inválido: {Raw}", json[..Math.Min(200, json.Length)]);
-                return (null, json);
-            }
-        }
-    }
-
-    public async Task<(string? RefinedContent, string? ErrorRaw)> RefineSectionAsync(
-        RefineSectionRequest request, string userId, CancellationToken ct)
-    {
-        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
-        var opts = deepSeekOptions.Value;
-
-        var systemPrompt =
-            "Você é um especialista em validação de startups. Refine APENAS o texto da seção fornecida. " +
-            "Retorne SOMENTE o texto refinado em markdown puro (sem JSON, sem aspas, sem ```). " +
-            "Mantenha o tom e formato. Aplique apenas as melhorias solicitadas.";
-
-        var userPrompt =
-            $"Etapa: {request.StageName}\n" +
-            $"Seção: {request.SectionTitle}\n\n" +
-            "## Conteúdo atual da seção\n" +
-            $"{request.SectionContent}\n\n" +
-            "## Feedback do usuário\n" +
-            $"{request.UserFeedback}\n\n" +
-            "Retorne apenas o texto refinado em markdown puro, em português do Brasil.";
-
         var payload = new
         {
             model = opts.Model,
@@ -399,58 +289,132 @@ public sealed class ChatService(
         HttpResponseMessage response;
         try
         {
-            response = await client.PostAsJsonAsync(
-                "https://api.deepseek.com/v1/chat/completions", payload, ct);
+            response = await client.PostAsJsonAsync(opts.BaseUrl + "/v1/chat/completions", payload, ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "[ChatService.RefineSection] Falha ao conectar na DeepSeek API");
-            return (null, "connection_error");
+            logger.LogError(ex, "[ChatService] Falha ao conectar na DeepSeek API");
+            return (null, null, "connection_error");
         }
 
         using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
-                var err = await response.Content.ReadAsStringAsync(ct);
-                logger.LogWarning("[ChatService.RefineSection] DeepSeek retornou {Status} (errSize={Size})",
+                var err = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                logger.LogWarning("[ChatService] DeepSeek retornou {Status} (errSize={Size})",
                     response.StatusCode, SanitizeForLog(err));
-                logger.LogDebug("[ChatService.RefineSection] DeepSeek error body: {Err}",
+                logger.LogDebug("[ChatService] DeepSeek error body: {Err}",
                     err[..Math.Min(200, err.Length)]);
-                return (null, err);
+                return (null, (int)response.StatusCode, err);
             }
 
-            var body = await response.Content.ReadAsStringAsync(ct);
-            string rawContent;
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             try
             {
                 using var doc = JsonDocument.Parse(body);
-                rawContent = doc.RootElement
+                var content = doc.RootElement
                     .GetProperty("choices")[0]
                     .GetProperty("message")
                     .GetProperty("content")
-                    .GetString() ?? string.Empty;
+                    .GetString();
+                return (content, 200, null);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "[ChatService.RefineSection] Falha ao parsear response da DeepSeek");
-                return (null, body);
+                logger.LogWarning(ex, "[ChatService] Falha ao parsear response da DeepSeek");
+                return (null, null, body);
             }
-
-            var refined = CleanRefinedText(rawContent);
-            if (string.IsNullOrWhiteSpace(refined))
-            {
-                logger.LogWarning("[ChatService.RefineSection] Conteúdo refinado vazio (rawSize={Size})",
-                    SanitizeForLog(rawContent));
-                logger.LogDebug("[ChatService.RefineSection] Raw content: {Raw}",
-                    rawContent[..Math.Min(200, rawContent.Length)]);
-                return (null, rawContent);
-            }
-
-            logger.LogDebug("[ChatService.RefineSection] OK — section={Section} user={UserId}",
-                request.SectionKey, userId);
-            return (refined, null);
         }
+    }
+
+    public async Task<(Dictionary<string, string>? Sections, string? ErrorRaw)> RefineDocumentAsync(
+        RefineRequest request, string userId, CancellationToken ct)
+    {
+        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
+        var systemPrompt =
+            "Você é um especialista em validação de startups.\n" +
+            "RESPONDA SOMENTE COM JSON VÁLIDO. Nenhum texto antes ou depois.\n\n" +
+            $"Documento atual da etapa \"{request.StageName}\" (JSON):\n{request.StageContent}\n\n" +
+            "Formato obrigatório da resposta:\n" +
+            "{\"changed_sections\":{\"nome_da_chave\":\"conteúdo refinado completo\"}}\n\n" +
+            "Regras:\n" +
+            "- Inclua SOMENTE as chaves que foram alteradas\n" +
+            "- NÃO inclua chaves não modificadas\n" +
+            "- NÃO adicione texto, markdown, explicações ou código fora do JSON\n" +
+            "- Os valores devem ser strings em português do Brasil";
+
+        var (rawContent, statusCode, errorBody) =
+            await CallDeepSeekAsync(systemPrompt, request.UserFeedback, ct).ConfigureAwait(false);
+
+        if (rawContent is null)
+            return (null, errorBody ?? "connection_error");
+
+        var json = ExtractJson(rawContent);
+        try
+        {
+            using var diffDoc = JsonDocument.Parse(json);
+            if (!diffDoc.RootElement.TryGetProperty("changed_sections", out var sectionsEl))
+            {
+                logger.LogWarning("[ChatService.Refine] 'changed_sections' ausente (jsonSize={Size})", SanitizeForLog(json));
+                logger.LogDebug("[ChatService.Refine] JSON sem changed_sections: {Raw}", json[..Math.Min(200, json.Length)]);
+                return (null, json);
+            }
+
+            var sections = sectionsEl.Deserialize<Dictionary<string, string>>();
+            if (sections is null || sections.Count == 0)
+                return (null, json);
+
+            logger.LogDebug("[ChatService.Refine] Diff OK — {Count} seção(ões) para user {UserId}",
+                sections.Count, userId);
+            return (sections, null);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex, "[ChatService.Refine] JSON inválido (jsonSize={Size})", SanitizeForLog(json));
+            logger.LogDebug("[ChatService.Refine] Conteúdo JSON inválido: {Raw}", json[..Math.Min(200, json.Length)]);
+            return (null, json);
+        }
+    }
+
+    public async Task<(string? RefinedContent, string? ErrorRaw)> RefineSectionAsync(
+        RefineSectionRequest request, string userId, CancellationToken ct)
+    {
+        // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
+        var systemPrompt =
+            "Você é um especialista em validação de startups. Refine APENAS o texto da seção fornecida. " +
+            "Retorne SOMENTE o texto refinado em markdown puro (sem JSON, sem aspas, sem ```). " +
+            "Mantenha o tom e formato. Aplique apenas as melhorias solicitadas.";
+
+        var userPrompt =
+            $"Etapa: {request.StageName}\n" +
+            $"Seção: {request.SectionTitle}\n\n" +
+            "## Conteúdo atual da seção\n" +
+            $"{request.SectionContent}\n\n" +
+            "## Feedback do usuário\n" +
+            $"{request.UserFeedback}\n\n" +
+            "Retorne apenas o texto refinado em markdown puro, em português do Brasil.";
+
+        var (rawContent, statusCode, errorBody) =
+            await CallDeepSeekAsync(systemPrompt, userPrompt, ct).ConfigureAwait(false);
+
+        if (rawContent is null)
+            return (null, errorBody ?? "connection_error");
+
+        var refined = CleanRefinedText(rawContent);
+        if (string.IsNullOrWhiteSpace(refined))
+        {
+            logger.LogWarning("[ChatService.RefineSection] Conteúdo refinado vazio (rawSize={Size})",
+                SanitizeForLog(rawContent));
+            logger.LogDebug("[ChatService.RefineSection] Raw content: {Raw}",
+                rawContent[..Math.Min(200, rawContent.Length)]);
+            return (null, rawContent);
+        }
+
+        logger.LogDebug("[ChatService.RefineSection] OK — section={Section} user={UserId}",
+            request.SectionKey, userId);
+        return (refined, null);
     }
 
     private static string CleanRefinedText(string raw)

@@ -185,12 +185,17 @@ builder.Services.AddSingleton<BackendMetrics>();
 builder.Services.Configure<IdeorAI.Options.LlmResilienceOptions>(
     builder.Configuration.GetSection(IdeorAI.Options.LlmResilienceOptions.Section));
 
+// ── ChatOptions ──────────────────────────────────────────────────────────────
+builder.Services.Configure<IdeorAI.Options.ChatOptions>(
+    builder.Configuration.GetSection(IdeorAI.Options.ChatOptions.Section));
+
 // ── DeepSeek Client (priority 1 — primário) ──────────────────────────────────
 if (!string.IsNullOrEmpty(deepSeekApiKey))
 {
     builder.Services.Configure<IdeorAI.Options.DeepSeekOptions>(opts =>
     {
         opts.ApiKey      = deepSeekApiKey;
+        opts.BaseUrl     = builder.Configuration["DeepSeek:BaseUrl"]     ?? "https://api.deepseek.com";
         opts.Model       = builder.Configuration["DeepSeek:Model"]       ?? "deepseek-v4-flash";
         opts.MaxTokens   = int.TryParse(builder.Configuration["DeepSeek:MaxTokens"],   out var mt) ? mt : 8000;
         opts.Temperature = float.TryParse(builder.Configuration["DeepSeek:Temperature"], System.Globalization.NumberStyles.Float,
