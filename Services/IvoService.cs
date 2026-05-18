@@ -76,7 +76,21 @@ public class IvoService : IIvoService
                 return;
             }
 
+            _logger.LogInformation("[IVO Eval] Chamando LLM para project {ProjectId} stage {Stage} (vars: {Vars})",
+                projectId, stageNumber, string.Join(",", variables));
+
             var scores = await CallGeminiEvaluationAsync(stageNumber, variables, stageContent);
+
+            _logger.LogInformation("[IVO Eval] Scores parseados para project {ProjectId} stage {Stage}: {Scores}",
+                projectId, stageNumber, string.Join(", ", scores.Select(kv => $"{kv.Key}={kv.Value}")));
+
+            // Detectar se todos os scores caíram para o default (5.0) — indica falha silenciosa do LLM
+            var allDefaults = scores.Count > 0 && scores.Values.All(v => v == 5.0m);
+            if (allDefaults)
+            {
+                _logger.LogWarning("[IVO Eval] Todos scores=5.0 (default) para project {ProjectId} stage {Stage} — possível falha LLM",
+                    projectId, stageNumber);
+            }
 
             // Atualizar apenas as variáveis desta etapa
             if (scores.TryGetValue("O", out var o)) project.IvoO = o;
@@ -88,18 +102,32 @@ public class IvoService : IIvoService
             // Atualizar score rescalado
             project.IvoScore10 = Math.Max(1.0m, Math.Min(10.0m, project.Score / 10.0m));
 
-            await _supabase
-                .From<ProjectModel>()
-                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
-                .Update(project);
+            try
+            {
+                var updateResp = await _supabase
+                    .From<ProjectModel>()
+                    .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+                    .Update(project);
+
+                _logger.LogInformation(
+                    "[IVO Eval] Update aplicado para project {ProjectId} stage {Stage}, rows afetadas: {Rows}",
+                    projectId, stageNumber, updateResp?.Models?.Count ?? -1);
+            }
+            catch (Exception updateEx)
+            {
+                _logger.LogError(updateEx, "[IVO Eval] FALHA em Update Supabase para project {ProjectId} stage {Stage}",
+                    projectId, stageNumber);
+                throw;
+            }
 
             _logger.LogInformation(
-                "IVO variables updated for project {ProjectId}, stage {Stage}: {Scores}",
+                "[IVO Eval] IVO variables persistidas project {ProjectId}, stage {Stage}: {Scores}",
                 projectId, stageNumber, string.Join(", ", scores.Select(kv => $"{kv.Key}={kv.Value}")));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in IVO EvaluateStageAsync for project {ProjectId}, stage {Stage}", projectId, stageNumber);
+            _logger.LogError(ex, "[IVO Eval] FALHA em EvaluateStageAsync project {ProjectId} stage {Stage}",
+                projectId, stageNumber);
         }
     }
 
@@ -282,12 +310,16 @@ public class IvoService : IIvoService
         return Math.Pow((double)score10, 1.3) * (double)(o * m * v * e * t * d) / 100_000.0;
     }
 
-    // IVO Index (R$) = min(200_000 × (IVO + 1)^2.2, 1_000_000_000)
+    /// <summary>
+    /// IVO Index (R$) = min(250 × (IVO_raw + 1)^2.5, 10_000_000)
+    /// Calibrado para projeto vazio R$ 250, projeto bom R$ 5M,
+    /// projeto excelente alcança cap de R$ 10M com OMVET >= 9.
+    /// </summary>
     private static decimal ComputeIvoIndex(decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
         var ivo = ComputeRawIvo(score10, o, m, v, e, t, d);
-        var ivoIndex = 200_000.0 * Math.Pow(ivo + 1.0, 2.2);
-        return (decimal)Math.Min(ivoIndex, 1_000_000_000.0);
+        var ivoIndex = 250.0 * Math.Pow(ivo + 1.0, 2.5);
+        return (decimal)Math.Min(ivoIndex, 10_000_000.0);
     }
 
     private string BuildEvaluationPrompt(int stageNumber, string[] variables, string content)
@@ -322,9 +354,17 @@ public class IvoService : IIvoService
         {
             var prompt = BuildEvaluationPrompt(stageNumber, variables, content);
 
+            _logger.LogInformation("[IVO Eval] Chamando LlmFallbackService stage {Stage}, prompt len={Len}",
+                stageNumber, prompt.Length);
+
             var llmResult = await _llmFallbackService.GenerateAsync(prompt);
 
-            var cleaned = llmResult.Text
+            var rawText = llmResult?.Text ?? string.Empty;
+            _logger.LogInformation("[IVO Eval] LLM retornou: {Len} chars, primeiros 200: {Preview}",
+                rawText.Length,
+                rawText.Length > 200 ? rawText[..200] : rawText);
+
+            var cleaned = rawText
                 .Replace("```json", "").Replace("```", "")
                 .Trim();
 
@@ -349,8 +389,8 @@ public class IvoService : IIvoService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "IVO Gemini evaluation failed for stage {Stage}, using defaults (5.0) for variables: {Vars}",
+            _logger.LogError(ex,
+                "[IVO Eval] FALHA em CallGeminiEvaluationAsync stage {Stage}, usando defaults (5.0) para vars: {Vars}",
                 stageNumber, string.Join(", ", variables));
             return defaults;
         }
