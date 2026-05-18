@@ -10,8 +10,15 @@ public sealed class LlmFallbackService(
     Supabase.Client supabase,
     ILogger<LlmFallbackService> logger) : ILlmFallbackService
 {
+    // TODO: re-habilitar fallback Gemini/OpenRouter quando precisarmos.
+    // Por enquanto, usamos APENAS DeepSeek como provider único.
+    // Se DeepSeek falhar, retornamos LlmUnavailableException (sem cascata).
     private readonly IReadOnlyList<ILlmClient> _clients =
-        clients.OrderBy(c => c.Priority).ToList().AsReadOnly();
+        clients
+            .Where(c => string.Equals(c.ProviderName, "DeepSeek", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(c => c.Priority)
+            .ToList()
+            .AsReadOnly();
 
     private readonly ConcurrentDictionary<string, ProviderState> _states = new();
 

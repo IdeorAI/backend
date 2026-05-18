@@ -8,7 +8,8 @@ namespace IdeorAI.Services;
 /// <summary>
 /// Implementação do IvoService.
 /// Ver IIvoService para documentação completa da fórmula e variáveis.
-/// Usa ILlmFallbackService para avaliação — DeepSeek (primário) → OpenRouter → Gemini.
+/// Usa ILlmFallbackService para avaliação — DeepSeek como único provider ativo.
+/// TODO: re-habilitar Gemini/OpenRouter quando precisarmos.
 /// </summary>
 public class IvoService : IIvoService
 {
@@ -79,7 +80,7 @@ public class IvoService : IIvoService
             _logger.LogInformation("[IVO Eval] Chamando LLM para project {ProjectId} stage {Stage} (vars: {Vars})",
                 projectId, stageNumber, string.Join(",", variables));
 
-            var scores = await CallGeminiEvaluationAsync(stageNumber, variables, stageContent);
+            var scores = await CallLlmEvaluationAsync(stageNumber, variables, stageContent);
 
             _logger.LogInformation("[IVO Eval] Scores parseados para project {ProjectId} stage {Stage}: {Scores}",
                 projectId, stageNumber, string.Join(", ", scores.Select(kv => $"{kv.Key}={kv.Value}")));
@@ -339,6 +340,7 @@ public class IvoService : IIvoService
         var jsonExample = "{\"scores\": {" + exampleScores + "}, \"reasoning\": {" + exampleReasoning + "}}";
 
         return
+            "RESPONDA SOMENTE COM JSON VÁLIDO. Sem prefácio, sem markdown, sem explicações antes ou depois.\n\n" +
             $"Analise o seguinte conteúdo gerado para a {stageName} de uma startup e retorne SOMENTE um JSON com os scores indicados.\n\n" +
             $"Critérios de avaliação:\n{criteria}\n\n" +
             "Escala: 1 = muito fraco, 5 = adequado/médio, 10 = excepcional\n\n" +
@@ -346,7 +348,41 @@ public class IvoService : IIvoService
             $"Retorne APENAS o JSON (sem markdown, sem explicação extra):\n{jsonExample}";
     }
 
-    private async Task<Dictionary<string, decimal>> CallGeminiEvaluationAsync(int stageNumber, string[] variables, string content)
+    /// <summary>
+    /// Extrai um objeto JSON de uma string que pode conter prefácio, markdown ou sufixo.
+    /// Estratégias: bloco ```json``` → primeiro '{' ao último '}' → "{}".
+    /// </summary>
+    private static string ExtractJsonObject(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "{}";
+        var trimmed = raw.Trim();
+
+        // Estratégia 1: bloco ```json ... ``` ou ``` ... ```
+        var fenceStart = trimmed.IndexOf("```", StringComparison.Ordinal);
+        if (fenceStart >= 0)
+        {
+            var afterFence = trimmed.IndexOf('\n', fenceStart);
+            if (afterFence >= 0)
+            {
+                var fenceEnd = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+                if (fenceEnd > afterFence)
+                {
+                    var candidate = trimmed[(afterFence + 1)..fenceEnd].Trim();
+                    if (candidate.StartsWith('{')) return candidate;
+                }
+            }
+        }
+
+        // Estratégia 2: extrair do primeiro '{' ao último '}'
+        var firstBrace = trimmed.IndexOf('{');
+        var lastBrace = trimmed.LastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace)
+            return trimmed[firstBrace..(lastBrace + 1)];
+
+        return "{}";
+    }
+
+    private async Task<Dictionary<string, decimal>> CallLlmEvaluationAsync(int stageNumber, string[] variables, string content)
     {
         var defaults = variables.ToDictionary(v => v, _ => 5.0m);
 
@@ -354,7 +390,7 @@ public class IvoService : IIvoService
         {
             var prompt = BuildEvaluationPrompt(stageNumber, variables, content);
 
-            _logger.LogInformation("[IVO Eval] Chamando LlmFallbackService stage {Stage}, prompt len={Len}",
+            _logger.LogInformation("[IVO Eval] Chamando LlmFallbackService (DeepSeek) stage {Stage}, prompt len={Len}",
                 stageNumber, prompt.Length);
 
             var llmResult = await _llmFallbackService.GenerateAsync(prompt);
@@ -364,12 +400,31 @@ public class IvoService : IIvoService
                 rawText.Length,
                 rawText.Length > 200 ? rawText[..200] : rawText);
 
-            var cleaned = rawText
-                .Replace("```json", "").Replace("```", "")
-                .Trim();
+            var cleaned = ExtractJsonObject(rawText);
 
-            using var doc = JsonDocument.Parse(cleaned);
-            var scores = doc.RootElement.GetProperty("scores");
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(cleaned);
+            }
+            catch (JsonException jex)
+            {
+                var preview = rawText.Length > 200 ? rawText[..200] : rawText;
+                _logger.LogError(jex,
+                    "[IVO Eval] JSON parse falhou stage {Stage} mesmo após ExtractJsonObject. Raw (200 chars): {Preview}",
+                    stageNumber, preview);
+                return defaults;
+            }
+
+            using (doc)
+            {
+            if (!doc.RootElement.TryGetProperty("scores", out var scores))
+            {
+                var preview = rawText.Length > 200 ? rawText[..200] : rawText;
+                _logger.LogError("[IVO Eval] JSON sem propriedade 'scores' stage {Stage}. Raw (200 chars): {Preview}",
+                    stageNumber, preview);
+                return defaults;
+            }
 
             var result = new Dictionary<string, decimal>();
             foreach (var variable in variables)
@@ -386,11 +441,12 @@ public class IvoService : IIvoService
             }
 
             return result;
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "[IVO Eval] FALHA em CallGeminiEvaluationAsync stage {Stage}, usando defaults (5.0) para vars: {Vars}",
+                "[IVO Eval] FALHA em CallLlmEvaluationAsync stage {Stage}, usando defaults (5.0) para vars: {Vars}",
                 stageNumber, string.Join(", ", variables));
             return defaults;
         }
