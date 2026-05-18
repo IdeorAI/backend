@@ -3,7 +3,9 @@ using IdeorAI.Model.SupabaseModels;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace IdeorAI.Services;
 
@@ -311,6 +313,323 @@ public class PdfExportService : IPdfExportService
             _ => element.GetRawText()
         };
     }
+
+    // ============================================================
+    // Spec 018 — PDF Relatório por Etapa (markdown-aware)
+    // ============================================================
+
+    private const string IdeorPurple = "#8c7dff";
+
+    public async Task<byte[]> GenerateStagePdfAsync(string projectId, string taskId, string userId, CancellationToken ct)
+    {
+        _logger.LogInformation("[StagePdf] Gerando PDF para project {ProjectId} task {TaskId}", projectId, taskId);
+
+        // 1) Buscar projeto e validar owner
+        var project = await _supabase
+            .From<ProjectModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Single();
+
+        if (project == null)
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        if (!string.Equals(project.OwnerId, userId, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("User is not owner of this project");
+
+        // 2) Buscar task e validar projectId
+        var task = await _supabase
+            .From<TaskModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, taskId)
+            .Single();
+
+        if (task == null)
+            throw new KeyNotFoundException($"Task {taskId} not found");
+
+        if (!string.Equals(task.ProjectId, projectId, StringComparison.OrdinalIgnoreCase))
+            throw new KeyNotFoundException("Task does not belong to project");
+
+        // 3) Parsear conteúdo nos 3 shapes
+        var sections = ParseStageContent(task.Content ?? string.Empty);
+
+        // 4) Construir PDF
+        var stageName = !string.IsNullOrWhiteSpace(task.Title) ? task.Title : task.Phase ?? "Etapa";
+        var projectName = project.Name ?? "Projeto";
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(2.5f, Unit.Centimetre);
+                page.PageColor(Colors.White);
+                page.DefaultTextStyle(x => x.FontSize(11).FontColor(Colors.Grey.Darken4));
+
+                page.Header().Column(col =>
+                {
+                    col.Spacing(2);
+                    col.Item().Text("IdeorAI").FontSize(14).Bold().FontColor(IdeorPurple);
+                    col.Item().Text(projectName).FontSize(18).Bold().FontColor(Colors.Grey.Darken4);
+                    col.Item().Text(stageName).FontSize(13).Medium().FontColor(Colors.Grey.Darken1);
+                });
+
+                page.Content().PaddingVertical(0.6f, Unit.Centimetre).Column(column =>
+                {
+                    column.Spacing(10);
+
+                    int idx = 1;
+                    foreach (var section in sections)
+                    {
+                        if (!string.IsNullOrWhiteSpace(section.Title))
+                        {
+                            var title = section.Numbered ? $"{idx}. {section.Title}" : section.Title;
+                            column.Item().PaddingTop(8).Text(title)
+                                .FontSize(14).Bold().FontColor(IdeorPurple);
+                            if (section.Numbered) idx++;
+                        }
+
+                        RenderMarkdownBlocks(column, section.Markdown ?? string.Empty);
+                    }
+                });
+
+                page.Footer().Row(row =>
+                {
+                    row.RelativeItem().Text(text =>
+                    {
+                        text.DefaultTextStyle(s => s.FontSize(9).FontColor(Colors.Grey.Medium));
+                        text.Span("Página ");
+                        text.CurrentPageNumber();
+                        text.Span(" de ");
+                        text.TotalPages();
+                    });
+                    row.RelativeItem().AlignRight().Text("IdeorAI - ideoria.ai")
+                        .FontSize(9).FontColor(Colors.Grey.Medium);
+                });
+            });
+        });
+
+        return document.GeneratePdf();
+    }
+
+    private record StageSection(string Title, string Markdown, bool Numbered);
+
+    private List<StageSection> ParseStageContent(string content)
+    {
+        var sections = new List<StageSection>();
+        var trimmed = (content ?? string.Empty).Trim();
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            sections.Add(new StageSection("", "", false));
+            return sections;
+        }
+
+        // Tenta extrair JSON de fenced code block ```json ... ``` ou raw
+        string? jsonCandidate = ExtractJsonCandidate(trimmed);
+
+        if (jsonCandidate != null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonCandidate);
+                var root = doc.RootElement;
+
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    // Shape "wrapped": { "content": "markdown..." }
+                    if (root.TryGetProperty("content", out var contentProp) &&
+                        contentProp.ValueKind == JsonValueKind.String &&
+                        root.EnumerateObject().Count() == 1)
+                    {
+                        sections.Add(new StageSection("", contentProp.GetString() ?? "", false));
+                        return sections;
+                    }
+
+                    // Shape JSON estruturado: cada chave top-level vira seção
+                    foreach (var prop in root.EnumerateObject())
+                    {
+                        var title = HumanizeKey(prop.Name);
+                        var md = JsonValueToMarkdown(prop.Value);
+                        sections.Add(new StageSection(title, md, true));
+                    }
+                    return sections;
+                }
+            }
+            catch
+            {
+                // Cai no markdown puro
+            }
+        }
+
+        // Markdown puro
+        sections.Add(new StageSection("", trimmed, false));
+        return sections;
+    }
+
+    private string? ExtractJsonCandidate(string input)
+    {
+        var fenced = Regex.Match(input, @"```(?:json)?\s*([\s\S]*?)```", RegexOptions.IgnoreCase);
+        if (fenced.Success)
+        {
+            var inner = fenced.Groups[1].Value.Trim();
+            if (inner.StartsWith("{") || inner.StartsWith("[")) return inner;
+        }
+        if (input.StartsWith("{") || input.StartsWith("["))
+            return input;
+        return null;
+    }
+
+    private string JsonValueToMarkdown(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                return element.GetString() ?? "";
+            case JsonValueKind.Number:
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                return element.GetRawText();
+            case JsonValueKind.Null:
+                return "";
+            case JsonValueKind.Array:
+                var sbA = new System.Text.StringBuilder();
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        sbA.AppendLine("- " + FlattenObject(item));
+                    }
+                    else
+                    {
+                        sbA.AppendLine("- " + JsonValueToMarkdown(item));
+                    }
+                }
+                return sbA.ToString();
+            case JsonValueKind.Object:
+                var sbO = new System.Text.StringBuilder();
+                foreach (var p in element.EnumerateObject())
+                {
+                    sbO.AppendLine($"**{HumanizeKey(p.Name)}:** {JsonValueToMarkdown(p.Value)}");
+                }
+                return sbO.ToString();
+            default:
+                return element.GetRawText();
+        }
+    }
+
+    private string FlattenObject(JsonElement obj)
+    {
+        var parts = new List<string>();
+        foreach (var p in obj.EnumerateObject())
+        {
+            var val = p.Value.ValueKind == JsonValueKind.String
+                ? p.Value.GetString() ?? ""
+                : p.Value.GetRawText();
+            parts.Add($"**{HumanizeKey(p.Name)}:** {val}");
+        }
+        return string.Join(" — ", parts);
+    }
+
+    private string HumanizeKey(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return key;
+        var parts = key.Split(new[] { '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        var ti = CultureInfo.GetCultureInfo("pt-BR").TextInfo;
+        return string.Join(' ', parts.Select(p => ti.ToTitleCase(p.ToLowerInvariant())));
+    }
+
+    private void RenderMarkdownBlocks(ColumnDescriptor column, string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown)) return;
+
+        var lines = markdown.Replace("\r\n", "\n").Split('\n');
+        var bulletBuffer = new List<string>();
+
+        void FlushBullets()
+        {
+            if (bulletBuffer.Count == 0) return;
+            var items = bulletBuffer.ToList();
+            bulletBuffer.Clear();
+            column.Item().Column(c =>
+            {
+                c.Spacing(3);
+                foreach (var b in items)
+                {
+                    c.Item().Row(r =>
+                    {
+                        r.ConstantItem(12).Text("•").FontSize(11).FontColor(IdeorPurple);
+                        r.RelativeItem().Text(t => RenderInlineMarkdown(t, b, 11));
+                    });
+                }
+            });
+        }
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd();
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                FlushBullets();
+                column.Item().Height(4);
+                continue;
+            }
+
+            if (line.StartsWith("### "))
+            {
+                FlushBullets();
+                column.Item().PaddingTop(4).Text(line.Substring(4).Trim())
+                    .FontSize(12).Bold().FontColor(Colors.Grey.Darken3);
+                continue;
+            }
+            if (line.StartsWith("## "))
+            {
+                FlushBullets();
+                column.Item().PaddingTop(4).Text(line.Substring(3).Trim())
+                    .FontSize(13).Bold().FontColor(Colors.Grey.Darken3);
+                continue;
+            }
+            if (line.StartsWith("# "))
+            {
+                FlushBullets();
+                column.Item().PaddingTop(4).Text(line.Substring(2).Trim())
+                    .FontSize(14).Bold().FontColor(Colors.Grey.Darken3);
+                continue;
+            }
+
+            var bulletMatch = Regex.Match(line, @"^\s*[-*]\s+(.*)$");
+            if (bulletMatch.Success)
+            {
+                bulletBuffer.Add(bulletMatch.Groups[1].Value);
+                continue;
+            }
+
+            FlushBullets();
+            var paragraph = line.TrimStart();
+            column.Item().Text(t => RenderInlineMarkdown(t, paragraph, 11));
+        }
+
+        FlushBullets();
+    }
+
+    private void RenderInlineMarkdown(TextDescriptor text, string content, float fontSize)
+    {
+        // Bold com **texto** — demais inline como texto normal
+        var regex = new Regex(@"\*\*(.+?)\*\*");
+        int lastIdx = 0;
+        foreach (Match m in regex.Matches(content))
+        {
+            if (m.Index > lastIdx)
+            {
+                text.Span(content.Substring(lastIdx, m.Index - lastIdx)).FontSize(fontSize);
+            }
+            text.Span(m.Groups[1].Value).FontSize(fontSize).Bold();
+            lastIdx = m.Index + m.Length;
+        }
+        if (lastIdx < content.Length)
+        {
+            text.Span(content.Substring(lastIdx)).FontSize(fontSize);
+        }
+    }
 }
 
 /// <summary>
@@ -320,4 +639,5 @@ public interface IPdfExportService
 {
     Task<byte[]?> ExportProjectDocumentsAsync(Guid projectId, Guid userId);
     Task<byte[]?> ExportSinglePhaseDocumentAsync(Guid projectId, Guid userId, string phase);
+    Task<byte[]> GenerateStagePdfAsync(string projectId, string taskId, string userId, CancellationToken ct);
 }

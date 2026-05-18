@@ -266,6 +266,33 @@ public class DocumentsController : ControllerBase
         return File(pdfBytes, "application/pdf", fileName);
     }
 
+    /// <summary>
+    /// Gera PDF de uma etapa específica (Spec 018) — markdown-aware,
+    /// header IdeorAI + projeto + etapa, footer paginação.
+    /// </summary>
+    [HttpPost("~/api/projects/{projectId}/tasks/{taskId}/pdf")]
+    public async Task<IActionResult> DownloadStagePdf(
+        string projectId,
+        string taskId,
+        [FromHeader(Name = "x-user-id")] string? userId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(userId)) return Unauthorized();
+        try
+        {
+            var bytes = await _pdfExportService.GenerateStagePdfAsync(projectId, taskId, userId, ct);
+            var contentDisposition = $"attachment; filename=\"IdeorAI-stage-{taskId}.pdf\"";
+            Response.Headers["Content-Disposition"] = contentDisposition;
+            return File(bytes, "application/pdf");
+        }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StagePdf] Erro gerando PDF para project {ProjectId} task {TaskId}", projectId, taskId);
+            return StatusCode(500, new { error = "Erro ao gerar PDF" });
+        }
+    }
 }
 
 /// <summary>
