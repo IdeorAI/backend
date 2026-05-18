@@ -100,21 +100,27 @@ public static class RagKnowledgeBase
         new(
             ["ivo index", "ivo", "score", "pontuação", "avaliação", "nota", "índice"],
             """
-            ## IVO Index — Índice de Validação e Oportunidade
-            O IVO Index é coisa do Marcão , para entender melhor só perguntando pra ele, o que eu sei é que: Mede a maturidade e potencial da sua startup de 0 a 100.
-            **Dimensões avaliadas:**
-            - Clareza do problema (20%)
-            - Validação com clientes (20%)
-            - Tamanho de mercado (15%)
-            - Diferenciação competitiva (15%)
-            - Viabilidade do modelo de negócio (20%)
-            - Preparação para MVP (10%)
-            **Interpretação:**
-            - 0–39: Ideia em estágio inicial, muitos pontos a validar
-            - 40–69: Progressão sólida, continue desenvolvendo
-            - 70–89: Startup bem fundamentada, foco em execução
-            - 90–100: Validação excepcional, pronto para captar investimento
-            O IVO é calculado automaticamente conforme você preenche as etapas.
+            ## IVO Index — Ideor Value Opportunity
+
+            O IVO Index é o indicador principal de valor do seu projeto no IdeorAI, expresso em R$.
+            Ele combina 7 variáveis: progresso geral, originalidade, mercado, validação, execução, timing e documentação.
+
+            **Faixas típicas:**
+            - Projeto recém-criado: R$ 100.000 (valor base motivador)
+            - Com 1-2 etapas iniciadas: R$ 100k - R$ 200k
+            - Com 3 etapas concluídas: R$ 200k - R$ 500k (centenas de milhares)
+            - Com 5 etapas bem feitas: R$ 1M - R$ 5M (faixa de milhões)
+            - Excelente (todas variáveis altas): até R$ 10.000.000 (cap)
+
+            **Como subir o IVO:**
+            1. Complete todas as 5 etapas (mais peso é Documentação)
+            2. Gere conteúdo rico (>300 caracteres por seção) — sobe a variável D
+            3. Refine etapas para subir scores de O/M/V/E/T avaliados pela IA
+            4. Atinja marcos (validações de mercado, MVP funcional)
+
+            **Fórmula:** IVO_Index = min(100.000 × (IVO_raw + 1)^0.95, 10.000.000), onde IVO_raw considera todas as 7 variáveis multiplicativamente.
+
+            O IVO é dinâmico — recalcula a cada geração de etapa, refinamento ou edição.
             """),
 
         new(

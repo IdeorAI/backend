@@ -312,14 +312,14 @@ public class IvoService : IIvoService
     }
 
     /// <summary>
-    /// IVO Index (R$) = min(250 × (IVO_raw + 1)^2.5, 10_000_000)
-    /// Calibrado para projeto vazio R$ 250, projeto bom R$ 5M,
-    /// projeto excelente alcança cap de R$ 10M com OMVET >= 9.
+    /// IVO Index (R$) = min(100_000 × (IVO_raw + 1)^0.95, 10_000_000)
+    /// Calibração motivadora: projeto vazio começa em R$ 100k, projeto bom alcança R$ 2M,
+    /// perfeito alcança cap de R$ 10M.
     /// </summary>
     private static decimal ComputeIvoIndex(decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
         var ivo = ComputeRawIvo(score10, o, m, v, e, t, d);
-        var ivoIndex = 250.0 * Math.Pow(ivo + 1.0, 2.5);
+        var ivoIndex = 100_000.0 * Math.Pow(ivo + 1.0, 0.95);
         return (decimal)Math.Min(ivoIndex, 10_000_000.0);
     }
 
