@@ -54,7 +54,7 @@ public class ScoreService : IScoreService
                     .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
                     .Update(project);
 
-                var evaluated = tasks.Where(t => t.Status == "evaluated").ToList();
+                var evaluated = tasks.Where(t => string.Equals(t.Status, "evaluated", StringComparison.OrdinalIgnoreCase)).ToList();
                 _logger.LogInformation(
                     "Score {Score} persisted for project {ProjectId} (cat={Cat} completion={C:F1} depth={D:F1} quality={Q:F1} milestones={M:F1})",
                     score, projectId, project.Category ?? "n/a",
@@ -99,7 +99,7 @@ public class ScoreService : IScoreService
 
     private static decimal Compute(List<TaskModel> tasks, ProjectModel? project, int milestoneCount)
     {
-        var evaluated = tasks.Where(t => t.Status == "evaluated").ToList();
+        var evaluated = tasks.Where(t => string.Equals(t.Status, "evaluated", StringComparison.OrdinalIgnoreCase)).ToList();
         var total = CompletionPts(evaluated)
                   + DepthPts(evaluated)
                   + QualityPts(project)

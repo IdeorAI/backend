@@ -154,15 +154,34 @@ public class IvoService : IIvoService
 
             project.IvoScore10 = Math.Max(1.0m, Math.Min(10.0m, project.Score / 10.0m));
             project.IvoD = ComputeD(tasks.Models);
+
+            var evaluatedStages = tasks.Models
+                .Where(t => string.Equals(t.Status, "evaluated", StringComparison.OrdinalIgnoreCase))
+                .Select(t => ParseStageNumber(t.Phase))
+                .Where(n => n.HasValue)
+                .Select(n => n!.Value)
+                .Distinct()
+                .Count();
+
+            _logger.LogInformation(
+                "[IVO Recalc] project {ProjectId}: evaluatedStages={Stages}, Score10={S10}, O={O}, M={M}, V={V}, E={E}, T={T}, D={D}",
+                projectId, evaluatedStages, project.IvoScore10,
+                project.IvoO, project.IvoM, project.IvoV, project.IvoE, project.IvoT, project.IvoD);
+
             project.IvoIndex = ComputeIvoIndex(
+                evaluatedStages,
                 project.IvoScore10,
                 project.IvoO, project.IvoM, project.IvoV,
                 project.IvoE, project.IvoT, project.IvoD);
 
-            await _supabase
+            var updateResp = await _supabase
                 .From<ProjectModel>()
                 .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
                 .Update(project);
+
+            _logger.LogInformation(
+                "[IVO Recalc] Persistido project {ProjectId}: IvoIndex=R${Index:F2}, rows={Rows}",
+                projectId, project.IvoIndex, updateResp?.Models?.Count ?? -1);
 
             // Gravar snapshot no histórico para o gráfico de evolução
             try
@@ -298,7 +317,7 @@ public class IvoService : IIvoService
     private static decimal ComputeD(IEnumerable<TaskModel> tasks)
     {
         var taskList = tasks.ToList();
-        var evaluated = taskList.Where(t => t.Status == "evaluated").ToList();
+        var evaluated = taskList.Where(t => string.Equals(t.Status, "evaluated", StringComparison.OrdinalIgnoreCase)).ToList();
         var rich = evaluated.Count(t => (t.Content?.Length ?? 0) > 300);
         var bonus = evaluated.Count >= 5 ? 1.0m : 0.0m;
         var d = evaluated.Count * 1.5m + rich * 0.3m + bonus;
@@ -312,15 +331,36 @@ public class IvoService : IIvoService
     }
 
     /// <summary>
-    /// IVO Index (R$) = min(100_000 × (IVO_raw + 1)^0.95, 10_000_000)
-    /// Calibração motivadora: projeto vazio começa em R$ 100k, projeto bom alcança R$ 2M,
-    /// perfeito alcança cap de R$ 10M.
+    /// Calcula IVO Index com guardrails por número de etapas concluídas (avaliadas).
+    /// Faixas:
+    ///   0-1 etapas: R$ 250 (fixo)
+    ///   2 etapas:   R$ 250 - R$ 1.500
+    ///   3 etapas:   R$ 1.500 - R$ 10.000
+    ///   4 etapas:   R$ 10.000 - R$ 50.000
+    ///   5 etapas:   R$ 50.000 - R$ 1.000.000
+    /// Dentro da faixa, posição é determinada por quality = (omvet_avg × score10 × D) / 1000, clamped 0-1.
     /// </summary>
-    private static decimal ComputeIvoIndex(decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
+    private static decimal ComputeIvoIndex(
+        int evaluatedStages,
+        decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
-        var ivo = ComputeRawIvo(score10, o, m, v, e, t, d);
-        var ivoIndex = 100_000.0 * Math.Pow(ivo + 1.0, 0.95);
-        return (decimal)Math.Min(ivoIndex, 10_000_000.0);
+        var (min, max) = evaluatedStages switch
+        {
+            0 => (250m, 250m),
+            1 => (250m, 250m),
+            2 => (250m, 1500m),
+            3 => (1500m, 10000m),
+            4 => (10000m, 50000m),
+            _ => (50000m, 1000000m), // 5 ou mais
+        };
+
+        if (min == max) return min;
+
+        var omvetAvg = (o + m + v + e + t) / 5m;
+        var qualityRaw = (omvetAvg * score10 * d) / 1000m;
+        var quality = Math.Max(0m, Math.Min(1m, qualityRaw));
+
+        return Math.Round(min + (max - min) * quality, 2);
     }
 
     private string BuildEvaluationPrompt(int stageNumber, string[] variables, string content)

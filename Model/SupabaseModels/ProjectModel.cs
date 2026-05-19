@@ -87,7 +87,7 @@ public class ProjectModel : BaseModel
     public decimal IvoD { get; set; } = 1.0m;
 
     [Column("ivo_index")]
-    public decimal IvoIndex { get; set; } = 100000.0m;
+    public decimal IvoIndex { get; set; } = 250.0m;
 
     // Navigation properties (loaded via joins)
     public List<TaskModel>? Tasks { get; set; }

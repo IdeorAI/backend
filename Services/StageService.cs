@@ -101,7 +101,7 @@ public class StageService : IStageService
         _logger.LogInformation("Task {TaskId} created successfully", task.Id);
 
         // Recalcular IVO + Score sequencialmente quando a task vem evaluated
-        if (task.Status == "evaluated")
+        if (string.Equals(task.Status, "evaluated", StringComparison.OrdinalIgnoreCase))
         {
             EnqueueIvoAndScore(projectId, ParseStageNumber(task.Phase), task.Content ?? "");
         }
@@ -208,7 +208,7 @@ public class StageService : IStageService
         _logger.LogInformation("Task {TaskId} updated successfully", taskId);
 
         // Recalcular score e IVO quando task é atualizada com status evaluated (ex: regeneração)
-        if (task.Status == "evaluated")
+        if (string.Equals(task.Status, "evaluated", StringComparison.OrdinalIgnoreCase))
         {
             EnqueueIvoAndScore(task.ProjectId, ParseStageNumber(task.Phase), task.Content ?? "");
         }

@@ -105,20 +105,19 @@ public static class RagKnowledgeBase
             O IVO Index é o indicador principal de valor do seu projeto no IdeorAI, expresso em R$.
             Ele combina 7 variáveis: progresso geral, originalidade, mercado, validação, execução, timing e documentação.
 
-            **Faixas típicas:**
-            - Projeto recém-criado: R$ 100.000 (valor base motivador)
-            - Com 1-2 etapas iniciadas: R$ 100k - R$ 200k
-            - Com 3 etapas concluídas: R$ 200k - R$ 500k (centenas de milhares)
-            - Com 5 etapas bem feitas: R$ 1M - R$ 5M (faixa de milhões)
-            - Excelente (todas variáveis altas): até R$ 10.000.000 (cap)
+            **Faixas de valor (guardrails):**
+            - 0 a 1 etapa concluída: R$ 250 (valor mínimo)
+            - 2 etapas concluídas: R$ 250 a R$ 1.500
+            - 3 etapas concluídas: R$ 1.500 a R$ 10.000
+            - 4 etapas concluídas: R$ 10.000 a R$ 50.000
+            - 5 etapas concluídas: R$ 50.000 a R$ 1.000.000
 
-            **Como subir o IVO:**
-            1. Complete todas as 5 etapas (mais peso é Documentação)
-            2. Gere conteúdo rico (>300 caracteres por seção) — sobe a variável D
-            3. Refine etapas para subir scores de O/M/V/E/T avaliados pela IA
-            4. Atinja marcos (validações de mercado, MVP funcional)
+            **O que aumenta o IVO dentro da faixa:**
+            - Conteúdo rico em cada etapa (qualidade da Documentação - variável D)
+            - Scores altos das variáveis O/M/V/E/T (avaliadas pela IA)
+            - Score geral alto (representa progresso e completude)
 
-            **Fórmula:** IVO_Index = min(100.000 × (IVO_raw + 1)^0.95, 10.000.000), onde IVO_raw considera todas as 7 variáveis multiplicativamente.
+            **Fórmula:** quality_factor = (omvet_avg × score_10 × D) / 1000, mapeado linearmente para a faixa da etapa atual.
 
             O IVO é dinâmico — recalcula a cada geração de etapa, refinamento ou edição.
             """),
