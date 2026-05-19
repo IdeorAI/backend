@@ -611,6 +611,87 @@ public class PdfExportService : IPdfExportService
         FlushBullets();
     }
 
+    // ============================================================
+    // Spec 019 — PDF dos documentos finais
+    // ============================================================
+    public async Task<byte[]> GenerateFinalDocumentPdfAsync(string projectId, string docType, string userId, CancellationToken ct)
+    {
+        _logger.LogInformation("[FinalDocPdf] project {ProjectId} type {DocType}", projectId, docType);
+
+        var project = await _supabase
+            .From<ProjectModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Single();
+
+        if (project == null)
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        if (!string.Equals(project.OwnerId, userId, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("User is not owner of this project");
+
+        var docResp = await _supabase
+            .From<GeneratedDocumentModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Filter("doc_type", Supabase.Postgrest.Constants.Operator.Equals, docType)
+            .Get();
+
+        var doc = docResp.Models?.FirstOrDefault();
+        if (doc == null)
+            throw new KeyNotFoundException($"Documento '{docType}' não gerado para project {projectId}");
+
+        var title = docType switch
+        {
+            "pitch-deck" => "Pitch Deck",
+            "business-plan" => "Plano de Negócios",
+            "executive-summary" => "Resumo Executivo",
+            _ => "Documento"
+        };
+
+        var projectName = project.Name ?? "Projeto";
+        var markdown = doc.ContentMd ?? string.Empty;
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(2.5f, Unit.Centimetre);
+                page.PageColor(Colors.White);
+                page.DefaultTextStyle(x => x.FontSize(11).FontColor(Colors.Grey.Darken4));
+
+                page.Header().Column(col =>
+                {
+                    col.Spacing(2);
+                    col.Item().Text("IdeorAI").FontSize(14).Bold().FontColor(IdeorPurple);
+                    col.Item().Text(title).FontSize(20).Bold().FontColor(Colors.Grey.Darken4);
+                    col.Item().Text(projectName).FontSize(12).Medium().FontColor(Colors.Grey.Darken1);
+                });
+
+                page.Content().PaddingVertical(0.6f, Unit.Centimetre).Column(column =>
+                {
+                    column.Spacing(10);
+                    RenderMarkdownBlocks(column, markdown);
+                });
+
+                page.Footer().Row(row =>
+                {
+                    row.RelativeItem().Text(text =>
+                    {
+                        text.DefaultTextStyle(s => s.FontSize(9).FontColor(Colors.Grey.Medium));
+                        text.Span("Página ");
+                        text.CurrentPageNumber();
+                        text.Span(" de ");
+                        text.TotalPages();
+                    });
+                    row.RelativeItem().AlignRight().Text("IdeorAI - ideoria.ai")
+                        .FontSize(9).FontColor(Colors.Grey.Medium);
+                });
+            });
+        });
+
+        return document.GeneratePdf();
+    }
+
     private void RenderInlineMarkdown(TextDescriptor text, string content, float fontSize)
     {
         // Bold com **texto** — demais inline como texto normal
@@ -640,4 +721,5 @@ public interface IPdfExportService
     Task<byte[]?> ExportProjectDocumentsAsync(Guid projectId, Guid userId);
     Task<byte[]?> ExportSinglePhaseDocumentAsync(Guid projectId, Guid userId, string phase);
     Task<byte[]> GenerateStagePdfAsync(string projectId, string taskId, string userId, CancellationToken ct);
+    Task<byte[]> GenerateFinalDocumentPdfAsync(string projectId, string docType, string userId, CancellationToken ct);
 }
