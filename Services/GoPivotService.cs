@@ -30,8 +30,8 @@ public class GoPivotService : IGoPivotService
         - Não use linguagem eufemística. Seja direto e específico.
         - confidence deve refletir genuinamente a força da ideia (0-100). Uma ideia média recebe no máximo 55.
         - pivotRecommendations deve ser ESPECÍFICO: não "mude o modelo de negócio", mas "foque em B2B em vez de B2C porque [motivo concreto]".
-        - Independente do veredito, retorne SEMPRE entre 3 e 5 pontos positivos concretos da ideia em `positivePoints` (específicos, não genéricos)
-          e entre 3 e 5 pontos a melhorar em `improvementPoints` (acionáveis e priorizados).
+        - **Pontos positivos (positivePoints) — OBRIGATÓRIO no mínimo 3, máximo 5.** Mesmo quando o veredito for PIVOT, identifique no MÍNIMO 3 aspectos genuinamente positivos da ideia. Esses pontos têm propósito motivacional: o fundador precisa enxergar o que vale a pena preservar e usar como alavanca. Exemplos: clareza do problema descrito, especificidade do nicho, evidência de pesquisa, postura do fundador, escolha de canal, simplicidade técnica do MVP, alinhamento com tendências. NÃO use elogios genéricos ("ideia interessante", "boa intenção"). Sempre cite uma evidência concreta do conteúdo da etapa. Se você não conseguir encontrar 3 aspectos positivos genuínos baseados no que está escrito, retorne aspectos relacionados ao processo (ex: "fundador demonstrou disposição para validar antes de construir", "escopo do MVP está bem delimitado") — mas SEMPRE 3 mínimo.
+        - Retorne entre 3 e 5 pontos em `improvementPoints` (acionáveis e priorizados).
         - Responda APENAS em JSON válido, sem markdown, sem texto fora do JSON.
 
         Formato de resposta:
