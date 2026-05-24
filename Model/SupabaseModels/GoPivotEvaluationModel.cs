@@ -25,6 +25,12 @@ public class GoPivotEvaluationModel : BaseModel
     [Column("pivot_recommendations")]
     public JToken? PivotRecommendations { get; set; }
 
+    [Column("positive_points")]
+    public JToken PositivePoints { get; set; } = new JArray();
+
+    [Column("improvement_points")]
+    public JToken ImprovementPoints { get; set; } = new JArray();
+
     [Column("override")]
     public bool Override { get; set; }
 

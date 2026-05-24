@@ -7,6 +7,8 @@ public class GoPivotResponseDto
     public int Confidence { get; set; }
     public List<string> Reasons { get; set; } = [];
     public List<string>? PivotRecommendations { get; set; }
+    public List<string> PositivePoints { get; set; } = [];
+    public List<string> ImprovementPoints { get; set; } = [];
     public bool Override { get; set; }
     public bool FromCache { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

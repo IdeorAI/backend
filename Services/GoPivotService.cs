@@ -30,6 +30,8 @@ public class GoPivotService : IGoPivotService
         - Não use linguagem eufemística. Seja direto e específico.
         - confidence deve refletir genuinamente a força da ideia (0-100). Uma ideia média recebe no máximo 55.
         - pivotRecommendations deve ser ESPECÍFICO: não "mude o modelo de negócio", mas "foque em B2B em vez de B2C porque [motivo concreto]".
+        - Independente do veredito, retorne SEMPRE entre 3 e 5 pontos positivos concretos da ideia em `positivePoints` (específicos, não genéricos)
+          e entre 3 e 5 pontos a melhorar em `improvementPoints` (acionáveis e priorizados).
         - Responda APENAS em JSON válido, sem markdown, sem texto fora do JSON.
 
         Formato de resposta:
@@ -37,9 +39,11 @@ public class GoPivotService : IGoPivotService
           "verdict": "GO" ou "PIVOT",
           "confidence": <inteiro 0-100>,
           "reasons": ["razão 1", "razão 2", "razão 3"],
-          "pivotRecommendations": ["recomendação específica 1", "recomendação específica 2"]
+          "pivotRecommendations": ["recomendação específica 1", "recomendação específica 2"],
+          "positivePoints": ["ponto positivo concreto 1", "ponto positivo concreto 2", "ponto positivo concreto 3"],
+          "improvementPoints": ["ponto a melhorar acionável 1", "ponto a melhorar acionável 2", "ponto a melhorar acionável 3"]
         }
-        (pivotRecommendations deve ser omitido se verdict for GO)
+        (pivotRecommendations deve ser omitido se verdict for GO; positivePoints e improvementPoints são SEMPRE obrigatórios)
         """;
 
     public GoPivotService(
@@ -95,6 +99,8 @@ public class GoPivotService : IGoPivotService
             PivotRecommendations = parsed.PivotRecommendations != null
                 ? Newtonsoft.Json.Linq.JArray.FromObject(parsed.PivotRecommendations)
                 : null,
+            PositivePoints = Newtonsoft.Json.Linq.JArray.FromObject(parsed.PositivePoints),
+            ImprovementPoints = Newtonsoft.Json.Linq.JArray.FromObject(parsed.ImprovementPoints),
         };
 
         await _supabase.From<GoPivotEvaluationModel>().Insert(model);
@@ -165,12 +171,24 @@ public class GoPivotService : IGoPivotService
                 pivotRecs.Add(r.GetString() ?? "");
         }
 
+        var positivePoints = new List<string>();
+        if (root.TryGetProperty("positivePoints", out var posEl) && posEl.ValueKind == JsonValueKind.Array)
+            foreach (var p in posEl.EnumerateArray())
+                positivePoints.Add(p.GetString() ?? "");
+
+        var improvementPoints = new List<string>();
+        if (root.TryGetProperty("improvementPoints", out var impEl) && impEl.ValueKind == JsonValueKind.Array)
+            foreach (var p in impEl.EnumerateArray())
+                improvementPoints.Add(p.GetString() ?? "");
+
         return new GoPivotResponseDto
         {
             Verdict = verdict,
             Confidence = Math.Clamp(confidence, 0, 100),
             Reasons = reasons,
             PivotRecommendations = pivotRecs,
+            PositivePoints = positivePoints,
+            ImprovementPoints = improvementPoints,
         };
     }
 
@@ -185,6 +203,12 @@ public class GoPivotService : IGoPivotService
         PivotRecommendations = m.PivotRecommendations is Newtonsoft.Json.Linq.JArray pArr
             ? pArr.Select(t => t?.ToString() ?? "").ToList()
             : null,
+        PositivePoints = m.PositivePoints is Newtonsoft.Json.Linq.JArray posArr
+            ? posArr.Select(t => t?.ToString() ?? "").ToList()
+            : [],
+        ImprovementPoints = m.ImprovementPoints is Newtonsoft.Json.Linq.JArray impArr
+            ? impArr.Select(t => t?.ToString() ?? "").ToList()
+            : [],
         Override = m.Override,
         FromCache = fromCache,
         CreatedAt = m.CreatedAt,
