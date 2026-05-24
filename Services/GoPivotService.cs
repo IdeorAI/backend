@@ -95,12 +95,12 @@ public class GoPivotService : IGoPivotService
             ProjectId = projectId.ToString(),
             Verdict = parsed.Verdict,
             Confidence = parsed.Confidence,
-            Reasons = Newtonsoft.Json.Linq.JArray.FromObject(parsed.Reasons),
+            Reasons = Newtonsoft.Json.Linq.JArray.FromObject(parsed.Reasons ?? new List<string>()),
             PivotRecommendations = parsed.PivotRecommendations != null
                 ? Newtonsoft.Json.Linq.JArray.FromObject(parsed.PivotRecommendations)
                 : null,
-            PositivePoints = Newtonsoft.Json.Linq.JArray.FromObject(parsed.PositivePoints),
-            ImprovementPoints = Newtonsoft.Json.Linq.JArray.FromObject(parsed.ImprovementPoints),
+            PositivePoints = Newtonsoft.Json.Linq.JArray.FromObject(parsed.PositivePoints ?? new List<string>()),
+            ImprovementPoints = Newtonsoft.Json.Linq.JArray.FromObject(parsed.ImprovementPoints ?? new List<string>()),
         };
 
         await _supabase.From<GoPivotEvaluationModel>().Insert(model);
@@ -147,6 +147,19 @@ public class GoPivotService : IGoPivotService
     private Task<LlmResult> CallLlmAsync(string prompt)
         => _llmFallbackService.GenerateAsync(prompt);
 
+    private static List<string> ReadStringArray(JsonElement root, string propertyName)
+    {
+        var list = new List<string>();
+        if (root.TryGetProperty(propertyName, out var el) && el.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in el.EnumerateArray())
+            {
+                list.Add(item.GetString() ?? "");
+            }
+        }
+        return list;
+    }
+
     private static GoPivotResponseDto ParseVerdict(string raw)
     {
         var cleaned = JsonSanitizer.ExtractJson(raw);
@@ -158,28 +171,14 @@ public class GoPivotService : IGoPivotService
 
         var confidence = root.TryGetProperty("confidence", out var conf) ? conf.GetInt32() : 50;
 
-        var reasons = new List<string>();
-        if (root.TryGetProperty("reasons", out var reasonsEl))
-            foreach (var r in reasonsEl.EnumerateArray())
-                reasons.Add(r.GetString() ?? "");
+        var reasons = ReadStringArray(root, "reasons");
 
         List<string>? pivotRecs = null;
-        if (verdict == "PIVOT" && root.TryGetProperty("pivotRecommendations", out var recsEl))
-        {
-            pivotRecs = [];
-            foreach (var r in recsEl.EnumerateArray())
-                pivotRecs.Add(r.GetString() ?? "");
-        }
+        if (verdict == "PIVOT" && root.TryGetProperty("pivotRecommendations", out _))
+            pivotRecs = ReadStringArray(root, "pivotRecommendations");
 
-        var positivePoints = new List<string>();
-        if (root.TryGetProperty("positivePoints", out var posEl) && posEl.ValueKind == JsonValueKind.Array)
-            foreach (var p in posEl.EnumerateArray())
-                positivePoints.Add(p.GetString() ?? "");
-
-        var improvementPoints = new List<string>();
-        if (root.TryGetProperty("improvementPoints", out var impEl) && impEl.ValueKind == JsonValueKind.Array)
-            foreach (var p in impEl.EnumerateArray())
-                improvementPoints.Add(p.GetString() ?? "");
+        var positivePoints = ReadStringArray(root, "positivePoints");
+        var improvementPoints = ReadStringArray(root, "improvementPoints");
 
         return new GoPivotResponseDto
         {
