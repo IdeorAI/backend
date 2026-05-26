@@ -59,6 +59,10 @@ public class GoPivotController : ControllerBase
         {
             return UnprocessableEntity(new { error = ex.Message });
         }
+        catch (GoPivotLimitReachedException ex)
+        {
+            return StatusCode(429, new { error = ex.Message, usageCount = 3, usageLimit = 3 });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[GoPivot] Falha ao avaliar projeto {ProjectId}", projectId);

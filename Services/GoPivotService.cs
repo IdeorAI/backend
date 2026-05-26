@@ -58,6 +58,16 @@ public class GoPivotService : IGoPivotService
         _logger = logger;
     }
 
+    private const int UsageLimit = 3;
+
+    private async Task<int> GetUsageCountAsync(Guid projectId)
+    {
+        var response = await _supabase.From<GoPivotEvaluationModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+            .Get();
+        return response.Models.Count;
+    }
+
     public async Task<GoPivotResponseDto?> GetExistingAsync(Guid projectId)
     {
         var response = await _supabase.From<GoPivotEvaluationModel>()
@@ -70,13 +80,20 @@ public class GoPivotService : IGoPivotService
         var model = response.Models.FirstOrDefault();
         if (model == null) return null;
 
-        return MapToDto(model, fromCache: true);
+        var dto = MapToDto(model, fromCache: true);
+        dto.UsageCount = await GetUsageCountAsync(projectId);
+        dto.UsageLimit = UsageLimit;
+        return dto;
     }
 
     public async Task<GoPivotResponseDto> EvaluateAsync(Guid projectId, Guid userId)
     {
         var existing = await GetExistingAsync(projectId);
         if (existing != null) return existing;
+
+        var currentCount = await GetUsageCountAsync(projectId);
+        if (currentCount >= UsageLimit)
+            throw new GoPivotLimitReachedException("Limite de 3 avaliações por projeto atingido.");
 
         var summaries = await _stageSummaryService.GetByProjectAsync(projectId);
         var etapa1 = summaries.FirstOrDefault(s => s.Stage == "etapa1");
@@ -108,7 +125,10 @@ public class GoPivotService : IGoPivotService
         _logger.LogInformation("[GoPivot] Verdict={Verdict} Confidence={Confidence} Project={ProjectId}",
             parsed.Verdict, parsed.Confidence, projectId);
 
-        return MapToDto(model, fromCache: false);
+        var dto = MapToDto(model, fromCache: false);
+        dto.UsageCount = currentCount + 1;
+        dto.UsageLimit = UsageLimit;
+        return dto;
     }
 
     public async Task InvalidateAsync(Guid projectId)

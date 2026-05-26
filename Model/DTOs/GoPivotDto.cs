@@ -12,6 +12,13 @@ public class GoPivotResponseDto
     public bool Override { get; set; }
     public bool FromCache { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public int UsageCount { get; set; }
+    public int UsageLimit { get; set; } = 3;
+}
+
+public class GoPivotLimitReachedException : Exception
+{
+    public GoPivotLimitReachedException(string message) : base(message) { }
 }
 
 public class GoPivotOverrideDto
