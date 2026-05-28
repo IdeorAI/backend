@@ -221,8 +221,9 @@ public class JwtAuthMiddleware
         if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
-        // Aceita apenas previews do projeto específico — não qualquer *.vercel.app
+        // Aceita previews do projeto específico — não qualquer *.vercel.app
         if (origin.StartsWith("https://frontend-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
+        if (origin.StartsWith("https://frontend-git-main-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 }
