@@ -224,6 +224,7 @@ public class JwtAuthMiddleware
         // Aceita previews do projeto específico — não qualquer *.vercel.app
         if (origin.StartsWith("https://frontend-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.StartsWith("https://frontend-git-main-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
+        if (origin.StartsWith("https://frontend-3roej4abt-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 }
