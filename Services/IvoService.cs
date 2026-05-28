@@ -85,7 +85,8 @@ public class IvoService : IIvoService
             return;
         }
 
-        try
+        // try/catch externo removido — exceções agora propagam para o caller
+        // (StageService.EnqueueIvoAndScoreAsync) onde são logadas com stack completo.
         {
             var project = await _supabase
                 .From<ProjectModel>()
@@ -138,16 +139,11 @@ public class IvoService : IIvoService
                 "[IVO Eval] IVO variables persistidas project {ProjectId}, stage {Stage}: {Scores}",
                 projectId, stageNumber, string.Join(", ", scores.Select(kv => $"{kv.Key}={kv.Value}")));
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[IVO Eval] FALHA em EvaluateStageAsync project {ProjectId} stage {Stage}",
-                projectId, stageNumber);
-        }
     }
 
     public async Task RecalculateAndPersistAsync(string projectId)
     {
-        try
+        // try/catch externo removido — exceções propagam para o caller para diagnóstico.
         {
             var project = await _supabase
                 .From<ProjectModel>()
@@ -224,10 +220,6 @@ public class IvoService : IIvoService
             _logger.LogInformation(
                 "IVO recalculated for project {ProjectId}: D={D}, Index=R${Index:F0}",
                 projectId, project.IvoD, project.IvoIndex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in IVO RecalculateAndPersistAsync for project {ProjectId}", projectId);
         }
     }
 

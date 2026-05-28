@@ -51,6 +51,9 @@ public class StageService : IStageService
     /// </summary>
     private async Task EnqueueIvoAndScoreAsync(Guid projectId, int? stageNumber, string content)
     {
+        _logger.LogInformation("[IVO-Score] ▶ ENTRANDO project={ProjectId} stage={Stage} contentLen={Len}",
+            projectId, stageNumber, content?.Length ?? 0);
+
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -58,16 +61,30 @@ public class StageService : IStageService
             var score = scope.ServiceProvider.GetRequiredService<IScoreService>();
 
             if (stageNumber.HasValue && !string.IsNullOrWhiteSpace(content))
+            {
+                _logger.LogInformation("[IVO-Score] → chamando EvaluateStageAsync project={ProjectId} stage={Stage}",
+                    projectId, stageNumber);
                 await ivo.EvaluateStageAsync(projectId.ToString(), stageNumber.Value, content);
+                _logger.LogInformation("[IVO-Score] ✓ EvaluateStageAsync OK project={ProjectId}", projectId);
+            }
 
+            _logger.LogInformation("[IVO-Score] → chamando RecalculateAndPersistAsync project={ProjectId}", projectId);
             await ivo.RecalculateAndPersistAsync(projectId.ToString());
+            _logger.LogInformation("[IVO-Score] ✓ RecalculateAndPersistAsync OK project={ProjectId}", projectId);
+
+            _logger.LogInformation("[IVO-Score] → chamando CalculateAndPersistAsync (Score) project={ProjectId}", projectId);
             await score.CalculateAndPersistAsync(projectId.ToString());
+            _logger.LogInformation("[IVO-Score] ✓ Score OK project={ProjectId}", projectId);
+
+            _logger.LogInformation("[IVO-Score] ✅ SAINDO OK project={ProjectId} stage={Stage}",
+                projectId, stageNumber);
         }
         catch (Exception ex)
         {
-            // Não rethrow — falha no recalc não deve quebrar o response da task
-            _logger.LogError(ex, "Falha ao recalcular IVO/Score para project {ProjectId} stage {Stage}",
-                projectId, stageNumber);
+            // Não rethrow — falha no recalc não deve quebrar o response da task.
+            // Stack trace completo agora aparece porque IvoService propaga as exceções.
+            _logger.LogError(ex, "[IVO-Score] ❌ FALHA project={ProjectId} stage={Stage} type={ExType} msg={ExMsg}",
+                projectId, stageNumber, ex.GetType().Name, ex.Message);
         }
     }
 
