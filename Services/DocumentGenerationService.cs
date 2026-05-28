@@ -14,6 +14,8 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
     private readonly IBackgroundTaskRunner _bg;
+    private readonly IIvoService _ivoService;
+    private readonly IScoreService _scoreService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -23,6 +25,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         IProjectService projectService,
         IStageSummaryService stageSummaryService,
         IBackgroundTaskRunner backgroundTaskRunner,
+        IIvoService ivoService,
+        IScoreService scoreService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration,
         ILlmFallbackService llmFallbackService)
@@ -33,6 +37,8 @@ public class DocumentGenerationService : IDocumentGenerationService
         _projectService = projectService;
         _stageSummaryService = stageSummaryService;
         _bg = backgroundTaskRunner;
+        _ivoService = ivoService;
+        _scoreService = scoreService;
         _logger = logger;
         _configuration = configuration;
     }
@@ -46,28 +52,30 @@ public class DocumentGenerationService : IDocumentGenerationService
 
     /// <summary>
     /// Reavalia IVO + Score após geração de documento.
-    /// SEQUENCIAL (await IVO → await Score) para evitar lost-update no ProjectModel.
-    /// Executa em scope DI dedicado via BackgroundTaskRunner.
+    /// SÍNCRONO inline. Antes era fire-and-forget, mas no Render free tier
+    /// o container hiberna e mata tasks em background antes de completarem.
+    /// Como IVO é mecânico (sem LLM), o overhead é < 200ms.
     /// </summary>
-    private void EnqueueIvoAndScore(Guid projectId, string stage, string content)
+    private async Task EnqueueIvoAndScoreAsync(Guid projectId, string stage, string content)
     {
-        _bg.Run(async (sp, _) =>
+        try
         {
-            var ivo = sp.GetRequiredService<IIvoService>();
-            var score = sp.GetRequiredService<IScoreService>();
-            var log = sp.GetRequiredService<ILogger<DocumentGenerationService>>();
-
             var stageNum = ParseStageNumber(stage);
             if (stageNum is >= 1 and <= 5)
             {
-                await ivo.EvaluateStageAsync(projectId.ToString(), stageNum, content);
+                await _ivoService.EvaluateStageAsync(projectId.ToString(), stageNum, content);
             }
-            await ivo.RecalculateAndPersistAsync(projectId.ToString());
-            await score.CalculateAndPersistAsync(projectId.ToString());
+            await _ivoService.RecalculateAndPersistAsync(projectId.ToString());
+            await _scoreService.CalculateAndPersistAsync(projectId.ToString());
 
-            log.LogInformation("[DocumentGeneration] ✅ IVO+Score reavaliados sequencialmente para project {ProjectId} stage {Stage}",
+            _logger.LogInformation("[DocumentGeneration] ✅ IVO+Score reavaliados (sync) para project {ProjectId} stage {Stage}",
                 projectId, stage);
-        }, $"ivo-score-{stage}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DocumentGeneration] Falha ao recalcular IVO/Score sync para project {ProjectId} stage {Stage}",
+                projectId, stage);
+        }
     }
 
     private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
@@ -440,7 +448,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
         // Reavaliar IVO + Score em background (sequencial, scope dedicado)
-        EnqueueIvoAndScore(projectId, stage, generatedContent);
+        await EnqueueIvoAndScoreAsync(projectId, stage, generatedContent);
 
         return createdTask;
     }
@@ -583,7 +591,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
         // Reavaliar IVO + Score em background (sequencial, scope dedicado)
-        EnqueueIvoAndScore(projectId, stage, generatedContent);
+        await EnqueueIvoAndScoreAsync(projectId, stage, generatedContent);
 
         _logger.LogInformation("Document regenerated successfully for task {TaskId}", taskId);
 
