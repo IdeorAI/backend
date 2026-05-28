@@ -31,6 +31,7 @@ public class JwtAuthMiddleware
         "/api/health",
         "/swagger",
         "/api/leads",
+        "/api/businessideas", // endpoint legado sem dados sensíveis de usuário
     ];
 
     public JwtAuthMiddleware(
