@@ -31,10 +31,6 @@ public class JwtAuthMiddleware
         "/api/health",
         "/swagger",
         "/api/leads",
-        "/api/chat",
-        "/api/businessideas",
-        "/api/projects",
-        "/api/documents",
     ];
 
     public JwtAuthMiddleware(
@@ -225,7 +221,8 @@ public class JwtAuthMiddleware
         if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
-        if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase)) return true;
+        // Aceita apenas previews do projeto específico — não qualquer *.vercel.app
+        if (origin.StartsWith("https://frontend-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 }
