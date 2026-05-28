@@ -14,6 +14,7 @@ public class StageService : IStageService
     private readonly Supabase.Client _supabase;
     private readonly IProjectService _projectService;
     private readonly IBackgroundTaskRunner _bg;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<StageService> _logger;
 
     // Definição das 7 etapas da Fase Projeto
@@ -32,30 +33,42 @@ public class StageService : IStageService
         Supabase.Client supabase,
         IProjectService projectService,
         IBackgroundTaskRunner backgroundTaskRunner,
+        IServiceScopeFactory scopeFactory,
         ILogger<StageService> logger)
     {
         _supabase = supabase;
         _projectService = projectService;
         _bg = backgroundTaskRunner;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
     /// <summary>
-    /// IVO + Score sequencialmente (evita lost-update no ProjectModel) com scope DI dedicado.
+    /// Recalcula IVO + Score SÍNCRONO inline. Antes era fire-and-forget,
+    /// mas no Render free tier o container hiberna e mata tasks em background.
+    /// Como o IVO agora é mecânico (sem LLM), o overhead é < 200ms — vale a
+    /// garantia de execução.
     /// </summary>
-    private void EnqueueIvoAndScore(Guid projectId, int? stageNumber, string content)
+    private async Task EnqueueIvoAndScoreAsync(Guid projectId, int? stageNumber, string content)
     {
-        _bg.Run(async (sp, _) =>
+        try
         {
-            var ivo = sp.GetRequiredService<IIvoService>();
-            var score = sp.GetRequiredService<IScoreService>();
+            using var scope = _scopeFactory.CreateScope();
+            var ivo = scope.ServiceProvider.GetRequiredService<IIvoService>();
+            var score = scope.ServiceProvider.GetRequiredService<IScoreService>();
 
             if (stageNumber.HasValue && !string.IsNullOrWhiteSpace(content))
                 await ivo.EvaluateStageAsync(projectId.ToString(), stageNumber.Value, content);
 
             await ivo.RecalculateAndPersistAsync(projectId.ToString());
             await score.CalculateAndPersistAsync(projectId.ToString());
-        }, $"stage-evaluated-{projectId}");
+        }
+        catch (Exception ex)
+        {
+            // Não rethrow — falha no recalc não deve quebrar o response da task
+            _logger.LogError(ex, "Falha ao recalcular IVO/Score para project {ProjectId} stage {Stage}",
+                projectId, stageNumber);
+        }
     }
 
     public async Task<ProjectTask?> CreateTaskAsync(Guid projectId, Guid userId, ProjectTask task)
@@ -103,7 +116,7 @@ public class StageService : IStageService
         // Recalcular IVO + Score sequencialmente quando a task vem evaluated
         if (string.Equals(task.Status, "evaluated", StringComparison.OrdinalIgnoreCase))
         {
-            EnqueueIvoAndScore(projectId, ParseStageNumber(task.Phase), task.Content ?? "");
+            await EnqueueIvoAndScoreAsync(projectId, ParseStageNumber(task.Phase), task.Content ?? "");
         }
 
         return task;
@@ -210,7 +223,7 @@ public class StageService : IStageService
         // Recalcular score e IVO quando task é atualizada com status evaluated (ex: regeneração)
         if (string.Equals(task.Status, "evaluated", StringComparison.OrdinalIgnoreCase))
         {
-            EnqueueIvoAndScore(task.ProjectId, ParseStageNumber(task.Phase), task.Content ?? "");
+            await EnqueueIvoAndScoreAsync(task.ProjectId, ParseStageNumber(task.Phase), task.Content ?? "");
         }
 
         return task;
