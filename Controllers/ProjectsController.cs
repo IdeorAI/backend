@@ -284,13 +284,32 @@ public class ProjectsController : ControllerBase
         if (project == null)
             return NotFound(new { error = "Project not found or access denied" });
 
-        if (full)
-            await _ivoService.ReevaluateAllStagesAsync(id.ToString());
-        else
-            await _ivoService.RecalculateAndPersistAsync(id.ToString());
+        try
+        {
+            if (full)
+                await _ivoService.ReevaluateAllStagesAsync(id.ToString());
+            else
+                await _ivoService.RecalculateAndPersistAsync(id.ToString());
 
-        var ivo = await _ivoService.GetIvoDataAsync(id.ToString());
-        return Ok(ivo);
+            var ivo = await _ivoService.GetIvoDataAsync(id.ToString());
+            return Ok(ivo);
+        }
+        catch (Exception ex)
+        {
+            // DIAGNÓSTICO TEMPORÁRIO — expõe o tipo e mensagem da exceção no body
+            // do response 500 para podermos identificar a causa raiz do IVO travado.
+            // TODO: trocar por mensagem genérica depois que a causa for resolvida.
+            _logger.LogError(ex, "[RecalculateIvo] FALHA project={ProjectId}", id);
+            return StatusCode(500, new
+            {
+                error = "Falha ao recalcular IVO",
+                exceptionType = ex.GetType().FullName,
+                message = ex.Message,
+                innerType = ex.InnerException?.GetType().FullName,
+                innerMessage = ex.InnerException?.Message,
+                stack = ex.StackTrace?.Split('\n').Take(8).ToArray(),
+            });
+        }
     }
 
     private ProjectResponseDto MapToDto(Project project, string myRole = "owner")
