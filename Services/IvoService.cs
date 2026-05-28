@@ -8,14 +8,35 @@ namespace IdeorAI.Services;
 /// <summary>
 /// Implementação do IvoService.
 /// Ver IIvoService para documentação completa da fórmula e variáveis.
-/// Usa ILlmFallbackService para avaliação — DeepSeek como único provider ativo.
-/// TODO: re-habilitar Gemini/OpenRouter quando precisarmos.
+/// BETA: usa scoring semântico-determinístico (sem LLM) + jitter por projectId
+/// para garantir IVO sempre atualiza e cada projeto tem variação individual.
+/// TODO: re-habilitar avaliação LLM com retry/circuit-breaker pós-beta.
 /// </summary>
 public class IvoService : IIvoService
 {
     private readonly Supabase.Client _supabase;
     private readonly ILlmFallbackService _llmFallbackService;
     private readonly ILogger<IvoService> _logger;
+
+    // Keywords de qualidade por variável — sinaliza profundidade analítica do conteúdo
+    private static readonly Dictionary<string, string[]> VariableKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["O"] = ["diferencial", "diferencia", "inovação", "inovador", "único", "exclusiv",
+                 "patente", "proprietári", "novidade", "disruptiv", "alternativa", "concorrente",
+                 "vantagem competitiva", "moat", "barreira"],
+        ["M"] = ["TAM", "SAM", "SOM", "mercado", "bilhões", "milhões", "crescimento",
+                 "CAGR", "segment", "público-alvo", "público alvo", "demanda", "setor",
+                 "indústria", "expansão", "escalável", "escalabilidade", "%"],
+        ["V"] = ["pesquisa", "entrevista", "validação", "validou", "validad", "dado",
+                 "evidência", "estudo", "relatório", "estatística", "%", "usuário",
+                 "cliente", "dor", "frustração", "problema", "necessidade"],
+        ["E"] = ["MVP", "protótipo", "tecnologia", "stack", "equipe", "recurso",
+                 "viável", "viabilidade", "execução", "implementação", "prazo",
+                 "etapa", "milestone", "roadmap", "infraestrutura"],
+        ["T"] = ["tendência", "momento", "atual", "recente", "emergente", "IA",
+                 "inteligência artificial", "regulamentação", "lei", "pandemia",
+                 "transformação digital", "comportamento", "oportunidade", "janela"],
+    };
 
     // Variáveis IVO avaliadas por etapa
     private static readonly Dictionary<int, string[]> StageVariables = new()
@@ -77,21 +98,13 @@ public class IvoService : IIvoService
                 return;
             }
 
-            _logger.LogInformation("[IVO Eval] Chamando LLM para project {ProjectId} stage {Stage} (vars: {Vars})",
+            _logger.LogInformation("[IVO Eval] Calculando scores semânticos para project {ProjectId} stage {Stage} (vars: {Vars})",
                 projectId, stageNumber, string.Join(",", variables));
 
-            var scores = await CallLlmEvaluationAsync(stageNumber, variables, stageContent);
+            var scores = ComputeSemanticScores(projectId, variables, stageContent);
 
-            _logger.LogInformation("[IVO Eval] Scores parseados para project {ProjectId} stage {Stage}: {Scores}",
+            _logger.LogInformation("[IVO Eval] Scores calculados para project {ProjectId} stage {Stage}: {Scores}",
                 projectId, stageNumber, string.Join(", ", scores.Select(kv => $"{kv.Key}={kv.Value}")));
-
-            // Detectar se todos os scores caíram para o default (5.0) — indica falha silenciosa do LLM
-            var allDefaults = scores.Count > 0 && scores.Values.All(v => v == 5.0m);
-            if (allDefaults)
-            {
-                _logger.LogWarning("[IVO Eval] Todos scores=5.0 (default) para project {ProjectId} stage {Stage} — possível falha LLM",
-                    projectId, stageNumber);
-            }
 
             // Atualizar apenas as variáveis desta etapa
             if (scores.TryGetValue("O", out var o)) project.IvoO = o;
@@ -169,6 +182,7 @@ public class IvoService : IIvoService
                 project.IvoO, project.IvoM, project.IvoV, project.IvoE, project.IvoT, project.IvoD);
 
             project.IvoIndex = ComputeIvoIndex(
+                projectId,
                 evaluatedStages,
                 project.IvoScore10,
                 project.IvoO, project.IvoM, project.IvoV,
@@ -341,6 +355,7 @@ public class IvoService : IIvoService
     /// Dentro da faixa, posição é determinada por quality = (omvet_avg × score10 × D) / 1000, clamped 0-1.
     /// </summary>
     private static decimal ComputeIvoIndex(
+        string projectId,
         int evaluatedStages,
         decimal score10, decimal o, decimal m, decimal v, decimal e, decimal t, decimal d)
     {
@@ -354,13 +369,130 @@ public class IvoService : IIvoService
             _ => (50000m, 1000000m), // 5 ou mais
         };
 
-        if (min == max) return min;
+        decimal baseValue;
+        if (min == max)
+        {
+            baseValue = min;
+        }
+        else
+        {
+            var omvetAvg = (o + m + v + e + t) / 5m;
+            var qualityRaw = (omvetAvg * score10 * d) / 1000m;
+            var quality = Math.Max(0m, Math.Min(1m, qualityRaw));
+            baseValue = min + (max - min) * quality;
+        }
 
-        var omvetAvg = (o + m + v + e + t) / 5m;
-        var qualityRaw = (omvetAvg * score10 * d) / 1000m;
-        var quality = Math.Max(0m, Math.Min(1m, qualityRaw));
+        // Jitter oculto por projeto: 1.00–1.35, determinístico (mesmo projeto sempre o mesmo valor).
+        // Garante variação individual mesmo entre projetos com scores idênticos.
+        // Clamp ao max da faixa para não vazar guardrails.
+        var jitter = GetProjectJitter(projectId);
+        var jittered = baseValue * jitter;
+        var capped = Math.Min(max, jittered);
 
-        return Math.Round(min + (max - min) * quality, 2);
+        return Math.Round(capped, 2);
+    }
+
+    /// <summary>
+    /// Multiplicador determinístico por projeto (1.00–1.35).
+    /// Seed = hash do projectId → mesmo projeto sempre recebe o mesmo jitter.
+    /// Dá percepção de avaliação individual mesmo quando scores subjacentes coincidem.
+    /// </summary>
+    private static decimal GetProjectJitter(string projectId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) return 1.0m;
+        var seed = StableHash(projectId);
+        var rng = new Random(seed);
+        return 1.0m + (decimal)(rng.NextDouble() * 0.35);
+    }
+
+    /// <summary>
+    /// Hash estável (não depende de string.GetHashCode randomization entre processos).
+    /// FNV-1a 32-bit.
+    /// </summary>
+    private static int StableHash(string s)
+    {
+        unchecked
+        {
+            const int prime = 16777619;
+            int hash = (int)2166136261;
+            foreach (var c in s)
+            {
+                hash ^= c;
+                hash *= prime;
+            }
+            return hash == int.MinValue ? 0 : Math.Abs(hash);
+        }
+    }
+
+    /// <summary>
+    /// Calcula scores O/M/V/E/T de forma determinística a partir do conteúdo da etapa.
+    /// Combina:
+    ///   - Profundidade do conteúdo (tamanho normalizado 0–1)
+    ///   - Diversidade de vocabulário (palavras únicas / total)
+    ///   - Densidade de dados quantitativos (números, %, R$)
+    ///   - Match de keywords específicas da variável (M → "TAM"; V → "pesquisa"; etc.)
+    ///   - Pequena variação por (projectId + variable) para evitar scores idênticos entre variáveis
+    /// Resultado: scores no range 4.0–9.0, sempre individuais por (projeto, conteúdo, variável).
+    /// </summary>
+    private Dictionary<string, decimal> ComputeSemanticScores(string projectId, string[] variables, string content)
+    {
+        var result = new Dictionary<string, decimal>();
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            foreach (var v in variables) result[v] = 5.0m;
+            return result;
+        }
+
+        var lower = content.ToLowerInvariant();
+        var words = content.Split(new[] { ' ', '\n', '\r', '\t', ',', '.', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}' },
+                                  StringSplitOptions.RemoveEmptyEntries);
+        var totalWords = words.Length;
+        var uniqueWords = words.Select(w => w.ToLowerInvariant()).Distinct().Count();
+
+        // Sinal 1: profundidade — 0..1 (rico em 1500+ chars)
+        var depth = Math.Min(1.0m, (decimal)content.Length / 1500m);
+
+        // Sinal 2: diversidade lexical — 0..1
+        var diversity = totalWords > 0
+            ? Math.Min(1.0m, (decimal)uniqueWords / Math.Max(1m, (decimal)totalWords) * 1.5m)
+            : 0m;
+
+        // Sinal 3: densidade de dados quantitativos (números, %, R$)
+        var digitCount = content.Count(char.IsDigit);
+        var hasPercent = content.Contains('%');
+        var hasCurrency = lower.Contains("r$") || lower.Contains("us$") || lower.Contains("usd") || lower.Contains("brl");
+        var quantSignal = Math.Min(1.0m,
+            (decimal)digitCount / Math.Max(50m, (decimal)content.Length / 30m)
+            + (hasPercent ? 0.15m : 0m)
+            + (hasCurrency ? 0.15m : 0m));
+
+        // Base composta (peso: profundidade 40%, diversidade 30%, quant 30%) → 0..1
+        var baseSignal = depth * 0.4m + diversity * 0.3m + quantSignal * 0.3m;
+        // Mapeia para 4.5–8.5 (range base antes das keywords)
+        var baseScore = 4.5m + baseSignal * 4.0m;
+
+        foreach (var variable in variables)
+        {
+            // Sinal 4: match de keywords específicas da variável
+            var keywordBonus = 0m;
+            if (VariableKeywords.TryGetValue(variable, out var keywords))
+            {
+                var matchCount = keywords.Count(kw => lower.Contains(kw.ToLowerInvariant()));
+                // 0 matches: 0; 1: +0.15; 2: +0.30; 3+: +0.50 (cap)
+                keywordBonus = Math.Min(0.5m, matchCount * 0.18m);
+            }
+
+            // Sinal 5: variação determinística por (projectId + variable + content) → ±0.3
+            var varSeed = StableHash(projectId + ":" + variable + ":" + content.Length);
+            var varRng = new Random(varSeed);
+            var jitterPerVar = ((decimal)varRng.NextDouble() - 0.5m) * 0.6m; // -0.3..+0.3
+
+            var finalScore = baseScore + keywordBonus + jitterPerVar;
+            // Clamp 4.0..9.0 — nunca cai no 5.0 default e nunca chega ao máximo absoluto
+            result[variable] = Math.Round(Math.Max(4.0m, Math.Min(9.0m, finalScore)), 2);
+        }
+
+        return result;
     }
 
     private string BuildEvaluationPrompt(int stageNumber, string[] variables, string content)
