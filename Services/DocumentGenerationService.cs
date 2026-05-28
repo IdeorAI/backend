@@ -13,9 +13,6 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly IStageService _stageService;
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
-    private readonly IBackgroundTaskRunner _bg;
-    private readonly IIvoService _ivoService;
-    private readonly IScoreService _scoreService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -24,9 +21,6 @@ public class DocumentGenerationService : IDocumentGenerationService
         IStageService stageService,
         IProjectService projectService,
         IStageSummaryService stageSummaryService,
-        IBackgroundTaskRunner backgroundTaskRunner,
-        IIvoService ivoService,
-        IScoreService scoreService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration,
         ILlmFallbackService llmFallbackService)
@@ -36,9 +30,6 @@ public class DocumentGenerationService : IDocumentGenerationService
         _stageService = stageService;
         _projectService = projectService;
         _stageSummaryService = stageSummaryService;
-        _bg = backgroundTaskRunner;
-        _ivoService = ivoService;
-        _scoreService = scoreService;
         _logger = logger;
         _configuration = configuration;
     }
@@ -50,33 +41,9 @@ public class DocumentGenerationService : IDocumentGenerationService
         return int.TryParse(stage.AsSpan(5), out var n) ? n : 0;
     }
 
-    /// <summary>
-    /// Reavalia IVO + Score após geração de documento.
-    /// SÍNCRONO inline. Antes era fire-and-forget, mas no Render free tier
-    /// o container hiberna e mata tasks em background antes de completarem.
-    /// Como IVO é mecânico (sem LLM), o overhead é < 200ms.
-    /// </summary>
-    private async Task EnqueueIvoAndScoreAsync(Guid projectId, string stage, string content)
-    {
-        try
-        {
-            var stageNum = ParseStageNumber(stage);
-            if (stageNum is >= 1 and <= 5)
-            {
-                await _ivoService.EvaluateStageAsync(projectId.ToString(), stageNum, content);
-            }
-            await _ivoService.RecalculateAndPersistAsync(projectId.ToString());
-            await _scoreService.CalculateAndPersistAsync(projectId.ToString());
-
-            _logger.LogInformation("[DocumentGeneration] ✅ IVO+Score reavaliados (sync) para project {ProjectId} stage {Stage}",
-                projectId, stage);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[DocumentGeneration] Falha ao recalcular IVO/Score sync para project {ProjectId} stage {Stage}",
-                projectId, stage);
-        }
-    }
+    // IVO+Score recalculation is now owned by StageService.CreateTaskAsync /
+    // UpdateTaskAsync — qualquer task que vira "evaluated" dispara o recalc lá.
+    // Removido o EnqueueIvoAndScore daqui para eliminar duplicação.
 
     private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
     {
@@ -448,7 +415,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
         // Reavaliar IVO + Score em background (sequencial, scope dedicado)
-        await EnqueueIvoAndScoreAsync(projectId, stage, generatedContent);
+        // IVO+Score já recalculados sincronicamente em StageService quando task vira "evaluated"
 
         return createdTask;
     }
@@ -591,7 +558,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         await SaveStageSummaryAsync(projectId, userId, stage, generatedContent);
 
         // Reavaliar IVO + Score em background (sequencial, scope dedicado)
-        await EnqueueIvoAndScoreAsync(projectId, stage, generatedContent);
+        // IVO+Score já recalculados sincronicamente em StageService quando task vira "evaluated"
 
         _logger.LogInformation("Document regenerated successfully for task {TaskId}", taskId);
 
