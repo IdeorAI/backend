@@ -1,3 +1,4 @@
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Supabase.Postgrest.Attributes;
 using Supabase.Postgrest.Models;
@@ -89,6 +90,8 @@ public class ProjectModel : BaseModel
     [Column("ivo_index")]
     public decimal IvoIndex { get; set; } = 250.0m;
 
-    // Navigation properties (loaded via joins)
+    // Navigation properties (loaded via joins) — NUNCA serializar no Update/Insert,
+    // senão o Supabase rejeita com PGRST204 "Could not find the 'Tasks' column".
+    [JsonIgnore]
     public List<TaskModel>? Tasks { get; set; }
 }
