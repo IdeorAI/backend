@@ -353,12 +353,12 @@ public class IvoService : IIvoService
     {
         var (min, max) = evaluatedStages switch
         {
-            0 => (250m, 250m),
-            1 => (250m, 250m),
-            2 => (250m, 1500m),
-            3 => (1500m, 10000m),
-            4 => (10000m, 50000m),
-            _ => (50000m, 1000000m), // 5 ou mais
+            0 => (0m, 0m),       // t0: projeto vazio = R$ 0
+            1 => (250m, 800m),
+            2 => (800m, 3000m),
+            3 => (3000m, 15000m),
+            4 => (15000m, 80000m),
+            _ => (80000m, 1000000m), // 5 ou mais
         };
 
         decimal baseValue;

@@ -88,7 +88,7 @@ public class ProjectModel : BaseModel
     public decimal IvoD { get; set; } = 1.0m;
 
     [Column("ivo_index")]
-    public decimal IvoIndex { get; set; } = 250.0m;
+    public decimal IvoIndex { get; set; } = 0m;
 
     // Navigation properties (loaded via joins) — NUNCA serializar no Update/Insert,
     // senão o Supabase rejeita com PGRST204 "Could not find the 'Tasks' column".
