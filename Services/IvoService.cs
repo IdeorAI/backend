@@ -225,86 +225,72 @@ public class IvoService : IIvoService
 
     public async Task ReevaluateAllStagesAsync(string projectId)
     {
-        try
+        // try/catch externo removido — exceções propagam para o caller (controller)
+        var tasks = await _supabase
+            .From<TaskModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "evaluated")
+            .Get();
+
+        var stageGroups = tasks.Models
+            .Where(t => !string.IsNullOrWhiteSpace(t.Content))
+            .GroupBy(t => ParseStageNumber(t.Phase))
+            .Where(g => g.Key.HasValue && StageVariables.ContainsKey(g.Key.Value))
+            .ToList();
+
+        if (!stageGroups.Any())
         {
-            var tasks = await _supabase
-                .From<TaskModel>()
-                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
-                .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "evaluated")
-                .Get();
-
-            // Agrupar tasks avaliadas por etapa e concatenar o conteúdo
-            var stageGroups = tasks.Models
-                .Where(t => !string.IsNullOrWhiteSpace(t.Content))
-                .GroupBy(t => ParseStageNumber(t.Phase))
-                .Where(g => g.Key.HasValue && StageVariables.ContainsKey(g.Key.Value))
-                .ToList();
-
-            if (!stageGroups.Any())
-            {
-                _logger.LogInformation("ReevaluateAllStages: no evaluated stages found for project {ProjectId}", projectId);
-                await RecalculateAndPersistAsync(projectId);
-                return;
-            }
-
-            foreach (var group in stageGroups)
-            {
-                var stageNumber = group.Key!.Value;
-                var combinedContent = string.Join("\n\n", group.Select(t => t.Content));
-                _logger.LogInformation("ReevaluateAllStages: evaluating stage {Stage} for project {ProjectId}", stageNumber, projectId);
-                await EvaluateStageAsync(projectId, stageNumber, combinedContent);
-            }
-
+            _logger.LogInformation("ReevaluateAllStages: no evaluated stages found for project {ProjectId}", projectId);
             await RecalculateAndPersistAsync(projectId);
+            return;
+        }
 
-            _logger.LogInformation("ReevaluateAllStages completed for project {ProjectId}: {StageCount} stages re-evaluated",
-                projectId, stageGroups.Count);
-        }
-        catch (Exception ex)
+        foreach (var group in stageGroups)
         {
-            _logger.LogError(ex, "Error in ReevaluateAllStagesAsync for project {ProjectId}", projectId);
+            var stageNumber = group.Key!.Value;
+            var combinedContent = string.Join("\n\n", group.Select(t => t.Content));
+            _logger.LogInformation("ReevaluateAllStages: evaluating stage {Stage} for project {ProjectId}", stageNumber, projectId);
+            await EvaluateStageAsync(projectId, stageNumber, combinedContent);
         }
+
+        await RecalculateAndPersistAsync(projectId);
+
+        _logger.LogInformation("ReevaluateAllStages completed for project {ProjectId}: {StageCount} stages re-evaluated",
+            projectId, stageGroups.Count);
     }
 
     public async Task<IvoDataDto?> GetIvoDataAsync(string projectId)
     {
-        try
-        {
-            var project = await _supabase
-                .From<ProjectModel>()
-                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
-                .Single();
+        // try/catch externo removido — exceções propagam para o caller
+        var project = await _supabase
+            .From<ProjectModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Single();
 
-            if (project == null) return null;
+        if (project == null) return null;
 
-            // IVO é parcial se alguma variável O/M/V/E/T ainda está no valor padrão 5.0 (não avaliada pelo Gemini)
-            var isPartial = project.IvoO == 5.0m || project.IvoM == 5.0m ||
-                            project.IvoV == 5.0m || project.IvoE == 5.0m ||
-                            project.IvoT == 5.0m;
+        // IVO é parcial se alguma variável O/M/V/E/T ainda está no valor padrão 5.0
+        var isPartial = project.IvoO == 5.0m || project.IvoM == 5.0m ||
+                        project.IvoV == 5.0m || project.IvoE == 5.0m ||
+                        project.IvoT == 5.0m;
 
-            var ivoValue = ComputeRawIvo(
-                project.IvoScore10,
-                project.IvoO, project.IvoM, project.IvoV,
-                project.IvoE, project.IvoT, project.IvoD);
+        var ivoValue = ComputeRawIvo(
+            project.IvoScore10,
+            project.IvoO, project.IvoM, project.IvoV,
+            project.IvoE, project.IvoT, project.IvoD);
 
-            return new IvoDataDto(
-                ScoreIvo: project.IvoScore10,
-                O: project.IvoO,
-                M: project.IvoM,
-                V: project.IvoV,
-                E: project.IvoE,
-                T: project.IvoT,
-                D: project.IvoD,
-                IvoValue: (decimal)ivoValue,
-                IvoIndex: project.IvoIndex,
-                IsPartial: isPartial
-            );
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in IVO GetIvoDataAsync for project {ProjectId}", projectId);
-            return null;
-        }
+        return new IvoDataDto(
+            ScoreIvo: project.IvoScore10,
+            O: project.IvoO,
+            M: project.IvoM,
+            V: project.IvoV,
+            E: project.IvoE,
+            T: project.IvoT,
+            D: project.IvoD,
+            IvoValue: (decimal)ivoValue,
+            IvoIndex: project.IvoIndex,
+            IsPartial: isPartial
+        );
     }
 
     // ─── Private Helpers ───────────────────────────────────────────────────────

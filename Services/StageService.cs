@@ -60,6 +60,9 @@ public class StageService : IStageService
             var ivo = scope.ServiceProvider.GetRequiredService<IIvoService>();
             var score = scope.ServiceProvider.GetRequiredService<IScoreService>();
 
+            // ORDEM: Score primeiro, depois IVO recalc — porque IVO usa project.Score
+            // como entrada (IvoScore10 = Score/10). Inverter causa lost-update.
+
             if (stageNumber.HasValue && !string.IsNullOrWhiteSpace(content))
             {
                 _logger.LogInformation("[IVO-Score] → chamando EvaluateStageAsync project={ProjectId} stage={Stage}",
@@ -68,13 +71,13 @@ public class StageService : IStageService
                 _logger.LogInformation("[IVO-Score] ✓ EvaluateStageAsync OK project={ProjectId}", projectId);
             }
 
-            _logger.LogInformation("[IVO-Score] → chamando RecalculateAndPersistAsync project={ProjectId}", projectId);
-            await ivo.RecalculateAndPersistAsync(projectId.ToString());
-            _logger.LogInformation("[IVO-Score] ✓ RecalculateAndPersistAsync OK project={ProjectId}", projectId);
-
             _logger.LogInformation("[IVO-Score] → chamando CalculateAndPersistAsync (Score) project={ProjectId}", projectId);
             await score.CalculateAndPersistAsync(projectId.ToString());
             _logger.LogInformation("[IVO-Score] ✓ Score OK project={ProjectId}", projectId);
+
+            _logger.LogInformation("[IVO-Score] → chamando RecalculateAndPersistAsync project={ProjectId}", projectId);
+            await ivo.RecalculateAndPersistAsync(projectId.ToString());
+            _logger.LogInformation("[IVO-Score] ✓ RecalculateAndPersistAsync OK project={ProjectId}", projectId);
 
             _logger.LogInformation("[IVO-Score] ✅ SAINDO OK project={ProjectId} stage={Stage}",
                 projectId, stageNumber);
@@ -227,7 +230,10 @@ public class StageService : IStageService
             EvaluationResult = task.EvaluationResult != null
                 ? JToken.Parse(task.EvaluationResult.RootElement.GetRawText())
                 : null,
-            UpdatedAt = task.UpdatedAt
+            UpdatedAt = task.UpdatedAt,
+            // Evita PGRST204: o serializador tenta mandar navigation properties como colunas.
+            Project = null,
+            IaEvaluations = null,
         };
 
         await _supabase
@@ -258,23 +264,13 @@ public class StageService : IStageService
             return null;
         }
 
-        var updated = await UpdateTaskAsync(taskId, userId, task =>
+        // UpdateTaskAsync já dispara EnqueueIvoAndScoreAsync (sync) quando status="evaluated".
+        // Removido o _bg.Run duplicado que recalculava Score em background — gerava
+        // race condition (lost-update concorrente) e era killado no Render free tier.
+        return await UpdateTaskAsync(taskId, userId, task =>
         {
             task.Status = newStatus;
         });
-
-        // Recalcular score quando task é avaliada (scope dedicado)
-        if (updated != null && newStatus == "evaluated")
-        {
-            var pid = updated.ProjectId;
-            _bg.Run(async (sp, _) =>
-            {
-                var score = sp.GetRequiredService<IScoreService>();
-                await score.CalculateAndPersistAsync(pid.ToString());
-            }, $"score-{pid}");
-        }
-
-        return updated;
     }
 
     public async Task<bool> CanAdvanceToNextPhaseAsync(Guid projectId, Guid userId)

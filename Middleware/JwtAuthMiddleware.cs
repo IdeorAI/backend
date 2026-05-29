@@ -222,10 +222,14 @@ public class JwtAuthMiddleware
         if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
         if (origin.Equals("https://www.ideorai.com", StringComparison.OrdinalIgnoreCase)) return true;
-        // Aceita previews do projeto específico — não qualquer *.vercel.app
-        if (origin.StartsWith("https://frontend-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
-        if (origin.StartsWith("https://frontend-git-main-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
-        if (origin.StartsWith("https://frontend-3roej4abt-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
+        // Vercel previews: aceita SOMENTE se for sub do projeto E terminar em .vercel.app
+        // — impede que origins tipo "https://frontend-ideor-ais-projects.attacker.com" passem.
+        if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+        {
+            if (origin.StartsWith("https://frontend-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
+            if (origin.StartsWith("https://frontend-git-main-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
+            if (origin.StartsWith("https://frontend-3roej4abt-ideor-ais-projects", StringComparison.OrdinalIgnoreCase)) return true;
+        }
         return false;
     }
 }
