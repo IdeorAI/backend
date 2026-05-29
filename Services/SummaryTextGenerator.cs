@@ -63,31 +63,43 @@ public static class SummaryTextGenerator
 
     /// <summary>
     /// Etapa 2: Pesquisa de Mercado
-    /// Template: "TAM: {tam}. Concorrentes: {count}. Oportunidade: {oportunidade}"
+    /// Schema real (JsonSanitizer): competidores_alternativas, gaps_exploraveis,
+    /// posicionamento, metricas_mercado. (Antes apontava para dimensionamento_mercado/
+    /// analise_competitiva/validacao_preco, que não existem — summary ficava vazio.)
     /// </summary>
     private static string GenerateEtapa2(JsonElement json)
     {
         var parts = new List<string>();
 
-        // TAM
-        if (json.TryGetProperty("dimensionamento_mercado", out var dim))
+        // Posicionamento (frase principal)
+        if (json.TryGetProperty("posicionamento", out var pos)
+            && pos.TryGetProperty("frase", out var frase))
         {
-            if (dim.TryGetProperty("tam", out var tam) && tam.TryGetProperty("valor", out var tamValor))
-                parts.Add($"TAM: {GetStringValue(tamValor)}");
+            parts.Add($"Posicionamento: {GetStringValue(frase)}");
         }
 
-        // Concorrentes
-        if (json.TryGetProperty("analise_competitiva", out var comp))
+        // Concorrentes (contagem de soluções reais)
+        if (json.TryGetProperty("competidores_alternativas", out var comp)
+            && comp.TryGetProperty("solucoes_reais", out var solucoes)
+            && solucoes.ValueKind == JsonValueKind.Array)
         {
-            if (comp.TryGetProperty("concorrentes_diretos", out var diretos) && diretos.ValueKind == JsonValueKind.Array)
-                parts.Add($"Concorrentes Diretos: {diretos.GetArrayLength()}");
+            parts.Add($"Concorrentes: {solucoes.GetArrayLength()}");
         }
 
-        // Preço
-        if (json.TryGetProperty("validacao_preco", out var preco))
+        // Gaps exploráveis (contagem)
+        if (json.TryGetProperty("gaps_exploraveis", out var gaps)
+            && gaps.ValueKind == JsonValueKind.Array)
         {
-            if (preco.TryGetProperty("faixa_preco_sugerida", out var faixa))
-                parts.Add($"Preço Sugerido: {GetStringValue(faixa)}");
+            parts.Add($"Gaps: {gaps.GetArrayLength()}");
+        }
+
+        // Primeira métrica de mercado (TAM, tamanho do segmento)
+        if (json.TryGetProperty("metricas_mercado", out var metricas)
+            && metricas.ValueKind == JsonValueKind.Array
+            && metricas.GetArrayLength() > 0
+            && metricas[0].TryGetProperty("valor", out var metricaValor))
+        {
+            parts.Add($"Mercado: {GetStringValue(metricaValor)}");
         }
 
         return Truncate(string.Join(". ", parts));
