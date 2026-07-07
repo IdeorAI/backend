@@ -80,6 +80,11 @@ public class Project
     public string? Constraints { get; set; }
 
     /// <summary>
+    /// Spec 028 — tags de contexto (palavras-chave) que ancoram a LLM nas etapas.
+    /// </summary>
+    public List<string>? Keywords { get; set; }
+
+    /// <summary>
     /// Data de criação do projeto
     /// </summary>
     public DateTime CreatedAt { get; set; }

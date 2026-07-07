@@ -146,8 +146,13 @@ namespace IdeorAI.Api.Controllers
             if (segment.Length > 400) segment = segment[..400];
 
             var prompt = $$"""
+                IDIOMA OBRIGATÓRIO: responda SEMPRE e INTEGRALMENTE em português do Brasil (pt-BR),
+                mesmo que o segmento mencione um país ou região de outro idioma (ex.: Argentina, México).
+                A região indica apenas o MERCADO-ALVO — nunca o idioma da resposta. NUNCA escreva em espanhol/inglês.
+
                 Você é um gerador de ideias de startups.
-                Gere {{count}} ideias inovadoras para o segmento fornecido.
+                Respeite rigorosamente o segmento informado — não troque de nicho.
+                Gere {{count}} ideias inovadoras, realistas e específicas para o segmento fornecido.
                 Retorne APENAS um JSON válido no formato:
                 {"suggested_name":"Nome Startup","ideas":[{"title":"Título curto","subtitle":"Descrição breve"}]}
                 O campo "suggested_name" deve ser um nome criativo, curto (2-4 palavras) em português para uma startup neste segmento.
@@ -159,7 +164,8 @@ namespace IdeorAI.Api.Controllers
                 SEGMENTO: "{{segment}}"
                 """;
 
-            var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
+            // Fase 1: temperatura baixa + Flash (tarefa simples, saída curta).
+            var result = await _llmFallbackService.GenerateAsync(prompt, new LlmOptions(Temperature: 0.3f, Model: "deepseek-v4-flash"), ct);
             var ideas = IdeaJsonParser.ParseIdeasJson(result.Text, count);
             var suggestedName = IdeaJsonParser.ParseSuggestedName(result.Text);
             return (ideas, suggestedName);
@@ -173,7 +179,12 @@ namespace IdeorAI.Api.Controllers
             if (segment.Length > 400) segment = segment[..400];
 
             var prompt = $$"""
+                IDIOMA OBRIGATÓRIO: responda SEMPRE e INTEGRALMENTE em português do Brasil (pt-BR),
+                mesmo que a ideia ou o segmento mencione um país ou região de outro idioma (ex.: Argentina, México).
+                A região indica apenas o MERCADO-ALVO — nunca o idioma da resposta. NUNCA escreva em espanhol/inglês.
+
                 Você é um gerador de ideias de startups.
+                Respeite rigorosamente o segmento informado — não troque de nicho.
                 Seu trabalho é propor 3 versões da ideia, cada uma com no máximo 400 caracteres.
                 Baseie-se na ideia semente e na descrição do segmento informadas.
                 Retorne APENAS JSON com o formato:
@@ -184,7 +195,8 @@ namespace IdeorAI.Api.Controllers
                 SEGMENTO: "{{segment}}"
                 """;
 
-            var result = await _llmFallbackService.GenerateAsync(prompt, ct: ct);
+            // Fase 1: temperatura baixa + Flash (tarefa simples, saída curta).
+            var result = await _llmFallbackService.GenerateAsync(prompt, new LlmOptions(Temperature: 0.3f, Model: "deepseek-v4-flash"), ct);
             return IdeaJsonParser.ParseSimpleIdeasJson(result.Text);
         }
 

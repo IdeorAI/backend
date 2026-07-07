@@ -103,35 +103,74 @@ public class StageService : IStageService
             return null;
         }
 
-        task.Id = Guid.NewGuid();
         task.ProjectId = projectId;
-        task.CreatedAt = DateTime.UtcNow;
         task.UpdatedAt = DateTime.UtcNow;
 
-        var model = new TaskModel
-        {
-            Id = task.Id.ToString(),
-            ProjectId = task.ProjectId.ToString(),
-            Title = task.Title,
-            Description = task.Description,
-            Phase = task.Phase,
-            Content = task.Content,
-            Status = task.Status,
-            EvaluationResult = task.EvaluationResult != null
-                ? JToken.Parse(task.EvaluationResult.RootElement.GetRawText())
-                : null,
-            CreatedAt = task.CreatedAt,
-            UpdatedAt = task.UpdatedAt,
-            // Navigation properties set to null to avoid schema cache issues
-            Project = null,
-            IaEvaluations = null
-        };
-
-        await _supabase
+        // Idempotência por (project_id, phase) para etapas: o Insert puro permitia
+        // tasks etapaN DUPLICADAS sob auto-save concorrente (Spec 024) — causava o
+        // "7/6" no roadmap. Se já existe uma task da mesma phase, ATUALIZA a mais
+        // recente (regeneração) em vez de criar outra. Convive com o índice único
+        // parcial em tasks(project_id, phase) WHERE phase LIKE 'etapa%'.
+        var existing = (await _supabase
             .From<TaskModel>()
-            .Insert(model);
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+            .Filter("phase", Supabase.Postgrest.Constants.Operator.Equals, task.Phase)
+            .Order("updated_at", Supabase.Postgrest.Constants.Ordering.Descending)
+            .Limit(1)
+            .Get()).Models.FirstOrDefault();
 
-        _logger.LogInformation("Task {TaskId} created successfully", task.Id);
+        if (existing != null)
+        {
+            task.Id = Guid.Parse(existing.Id);
+            task.CreatedAt = existing.CreatedAt;
+            existing.Title = task.Title;
+            existing.Description = task.Description;
+            existing.Content = task.Content;
+            existing.Status = task.Status;
+            existing.EvaluationResult = task.EvaluationResult != null
+                ? JToken.Parse(task.EvaluationResult.RootElement.GetRawText())
+                : null;
+            existing.UpdatedAt = task.UpdatedAt;
+            existing.OutdatedAt = null; // regenerar torna a etapa "atual" (Spec 023)
+            existing.Project = null;
+            existing.IaEvaluations = null;
+
+            await _supabase.From<TaskModel>()
+                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, existing.Id)
+                .Update(existing);
+
+            _logger.LogInformation("Task {TaskId} (phase {Phase}) atualizada (idempotente)", task.Id, task.Phase);
+        }
+        else
+        {
+            task.Id = Guid.NewGuid();
+            task.CreatedAt = DateTime.UtcNow;
+
+            var model = new TaskModel
+            {
+                Id = task.Id.ToString(),
+                ProjectId = task.ProjectId.ToString(),
+                Title = task.Title,
+                Description = task.Description,
+                Phase = task.Phase,
+                Content = task.Content,
+                Status = task.Status,
+                EvaluationResult = task.EvaluationResult != null
+                    ? JToken.Parse(task.EvaluationResult.RootElement.GetRawText())
+                    : null,
+                CreatedAt = task.CreatedAt,
+                UpdatedAt = task.UpdatedAt,
+                // Navigation properties set to null to avoid schema cache issues
+                Project = null,
+                IaEvaluations = null
+            };
+
+            await _supabase
+                .From<TaskModel>()
+                .Insert(model);
+
+            _logger.LogInformation("Task {TaskId} created successfully", task.Id);
+        }
 
         // Recalcular IVO + Score sequencialmente quando a task vem evaluated
         if (string.Equals(task.Status, "evaluated", StringComparison.OrdinalIgnoreCase))
@@ -356,6 +395,64 @@ public class StageService : IStageService
     }
 
     // Helper: extrai número da etapa de "etapa1" → 1, "etapa2" → 2, etc.
+    /// <summary>
+    /// Spec 023: marca como DESATUALIZADAS (outdated_at = now) as etapas posteriores
+    /// (índice de phase &gt; stageIndex) que já estão concluídas (status='evaluated')
+    /// e ainda não foram marcadas (outdated_at IS NULL). Operação SOMENTE de coluna —
+    /// NÃO chama EnqueueIvoAndScoreAsync nem qualquer recálculo. Tolerante a falha
+    /// parcial (loga e segue). Retorna quantas etapas foram marcadas.
+    /// </summary>
+    public async Task<int> MarkLaterStagesOutdatedAsync(Guid projectId, int stageIndex)
+    {
+        try
+        {
+            var resp = await _supabase
+                .From<TaskModel>()
+                .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId.ToString())
+                .Filter("status", Supabase.Postgrest.Constants.Operator.Equals, "evaluated")
+                .Get();
+
+            var posteriores = (resp.Models ?? new List<TaskModel>())
+                .Where(t => t.OutdatedAt == null
+                            && (ParseStageNumber(t.Phase) ?? 0) > stageIndex)
+                .ToList();
+
+            var marked = 0;
+            foreach (var t in posteriores)
+            {
+                try
+                {
+                    t.OutdatedAt = DateTime.UtcNow;
+                    // Evita PGRST204 com navigation properties no Update.
+                    t.Project = null;
+                    t.IaEvaluations = null;
+                    await _supabase.From<TaskModel>().Update(t);
+                    marked++;
+                }
+                catch (Exception exInner)
+                {
+                    _logger.LogWarning(exInner,
+                        "[Outdated] Falha ao marcar task {TaskId} (phase {Phase}) como desatualizada",
+                        t.Id, t.Phase);
+                }
+            }
+
+            if (marked > 0)
+                _logger.LogInformation(
+                    "[Outdated] {Count} etapa(s) posteriores a {StageIndex} marcadas como desatualizadas no project {ProjectId}",
+                    marked, stageIndex, projectId);
+
+            return marked;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[Outdated] Falha ao marcar etapas posteriores a {StageIndex} no project {ProjectId}",
+                stageIndex, projectId);
+            return 0;
+        }
+    }
+
     private static int? ParseStageNumber(string? phase)
     {
         if (string.IsNullOrWhiteSpace(phase)) return null;

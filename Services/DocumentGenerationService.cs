@@ -13,6 +13,7 @@ public class DocumentGenerationService : IDocumentGenerationService
     private readonly IStageService _stageService;
     private readonly IProjectService _projectService;
     private readonly IStageSummaryService _stageSummaryService;
+    private readonly IFinancialVariableService _financialVariableService;
     private readonly ILogger<DocumentGenerationService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -21,6 +22,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         IStageService stageService,
         IProjectService projectService,
         IStageSummaryService stageSummaryService,
+        IFinancialVariableService financialVariableService,
         ILogger<DocumentGenerationService> logger,
         IConfiguration configuration,
         ILlmFallbackService llmFallbackService)
@@ -30,6 +32,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         _stageService = stageService;
         _projectService = projectService;
         _stageSummaryService = stageSummaryService;
+        _financialVariableService = financialVariableService;
         _logger = logger;
         _configuration = configuration;
     }
@@ -47,8 +50,63 @@ public class DocumentGenerationService : IDocumentGenerationService
 
     private async Task<LlmResult> CallAiApiWithMetadataAsync(string prompt, string stage = "")
     {
-        _logger.LogInformation("[DocumentGeneration] Chamando IA para stage {Stage}", stage);
-        return await _llmFallbackService.GenerateAsync(prompt, new LlmOptions(SkipCentralMetrics: true));
+        // Roteamento híbrido: etapas analíticas → deepseek-v4-pro; simples → flash.
+        var model = ResolveModelForStage(stage);
+        var maxTokens = ResolveMaxTokensForStage(stage);
+        _logger.LogInformation("[DocumentGeneration] Chamando IA para stage {Stage} com modelo {Model} (maxTokens={MaxTokens})",
+            stage, model ?? "(default)", maxTokens);
+
+        // Fase 2: temperatura moderada — consistência nos JSONs estruturados
+        // sem perder riqueza analítica.
+        return await _llmFallbackService.GenerateAsync(
+            prompt, new LlmOptions(SkipCentralMetrics: true, Temperature: 0.4f, Model: model, MaxTokens: maxTokens));
+    }
+
+    /// <summary>
+    /// Teto de tokens de saída por etapa. A etapa 4 (Modelo de Negócio) usa o
+    /// deepseek-v4-pro ("thinking"): o raciocínio CONSOME o orçamento de tokens, e
+    /// com teto baixo (5000) sobrava zero para o `content` → resposta vazia → 400
+    /// intermitente. 8000 dá folga para reasoning + JSON. O HttpClient.Timeout agora
+    /// é infinito (Polly no controle), então saída maior não estoura mais timeout.
+    /// </summary>
+    private static int ResolveMaxTokensForStage(string stage) => stage?.ToLower() switch
+    {
+        "etapa4" => 8000,
+        _ => 8000,
+    };
+
+    /// <summary>
+    /// Mapa default de roteamento etapa → modelo (usado quando appsettings:LlmRouting
+    /// não cobre a etapa). Etapas analíticas usam o Pro (thinking); as mais diretas, Flash.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> DefaultStageRouting =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["etapa1"] = "deepseek-v4-pro",   // Problema e Oportunidade
+            ["etapa2"] = "deepseek-v4-pro",   // Pesquisa de Mercado
+            ["etapa3"] = "deepseek-v4-pro",   // Proposta de Valor
+            ["etapa4"] = "deepseek-v4-pro",   // Modelo de Negócio
+            ["etapa5"] = "deepseek-v4-pro",   // MVP
+            ["etapa6"] = "deepseek-v4-flash", // Equipe Mínima
+            ["etapa7"] = "deepseek-v4-pro",   // Pitch/Plano/Resumo
+        };
+
+    /// <summary>
+    /// Resolve o modelo para a etapa. Prioridade: appsettings:LlmRouting:&lt;stage&gt; →
+    /// mapa default → null (deixa o LlmOptions.Model nulo, caindo no DeepSeek:Model global).
+    /// </summary>
+    private string? ResolveModelForStage(string stage)
+    {
+        if (string.IsNullOrWhiteSpace(stage))
+            return null;
+
+        // 1) Override por config (sem recompilar): "LlmRouting": { "etapa1": "deepseek-v4-pro", ... }
+        var fromConfig = _configuration.GetValue<string>($"LlmRouting:{stage.ToLower()}");
+        if (!string.IsNullOrWhiteSpace(fromConfig))
+            return fromConfig;
+
+        // 2) Mapa default no código
+        return DefaultStageRouting.TryGetValue(stage, out var model) ? model : null;
     }
 
     private const int MaxContextLength = 3500;
@@ -175,6 +233,7 @@ public class DocumentGenerationService : IDocumentGenerationService
         }
 
         // Enriquecer inputs com dados do projeto (evita perguntar novamente o que já foi coletado na criação da ideia)
+        string parametrosProjeto = "";
         try
         {
             var project = await _projectService.GetByIdAsync(projectId, userId);
@@ -193,14 +252,23 @@ public class DocumentGenerationService : IDocumentGenerationService
                 if (!string.IsNullOrEmpty(project.TargetAudience) && !inputs.ContainsKey("segmento_alvo"))
                     inputs["segmento_alvo"] = SanitizeInput(project.TargetAudience);
 
+                if (!string.IsNullOrEmpty(project.ProductStructure) && !inputs.ContainsKey("estrutura_produto"))
+                    inputs["estrutura_produto"] = SanitizeInput(project.ProductStructure);
+
                 if (!string.IsNullOrEmpty(project.Description) && !inputs.ContainsKey("descricao_ideia"))
                     inputs["descricao_ideia"] = SanitizeInput(project.Description);
 
                 if (!inputs.ContainsKey("ideia") || string.IsNullOrEmpty(inputs["ideia"]))
                     inputs["ideia"] = SanitizeInput(project.Name);
 
-                _logger.LogInformation("[DocumentGeneration] Inputs enriquecidos com dados do projeto: categoria={Cat}, segmento={Seg}, regiao={Reg}",
-                    project.Category ?? "n/a", project.TargetAudience ?? "n/a", project.Region ?? "n/a");
+                // Bloco de PARÂMETROS TRAVADOS — definições do usuário que TODAS as
+                // etapas devem respeitar (ex.: B2B não pode virar B2C). Só entram os
+                // campos definidos explicitamente; "Não sei/prefiro não definir" é
+                // ignorado (a IA fica livre nesse ponto).
+                parametrosProjeto = BuildLockedParameters(project);
+
+                _logger.LogInformation("[DocumentGeneration] Inputs enriquecidos com dados do projeto: categoria={Cat}, segmento={Seg}, estrutura={Est}, regiao={Reg}",
+                    project.Category ?? "n/a", project.TargetAudience ?? "n/a", project.ProductStructure ?? "n/a", project.Region ?? "n/a");
             }
         }
         catch (Exception ex)
@@ -284,8 +352,10 @@ public class DocumentGenerationService : IDocumentGenerationService
                     break;
             }
 
-            // Adicionar contexto acumulado ao prompt
+            // Adicionar parâmetros travados (público-alvo, estrutura) + contexto acumulado.
+            // Parâmetros vêm DEPOIS do contexto para reforçar a restrição no final do prompt.
             prompt += contextPrompt;
+            prompt += parametrosProjeto;
 
             _logger.LogInformation("[DocumentGeneration] Prompt gerado com sucesso. Modo: {Mode}, Comprimento: {Length} caracteres",
                 promptMode, prompt.Length);
@@ -469,6 +539,20 @@ public class DocumentGenerationService : IDocumentGenerationService
             }
         }
 
+        // Parâmetros travados (público-alvo, região, segmento, FOCO/tags — Spec 028).
+        // Sem isso, regenerar uma etapa perdia as âncoras que a geração inicial tinha.
+        string parametrosProjeto = "";
+        try
+        {
+            var project = await _projectService.GetByIdAsync(projectId, userId);
+            if (project != null)
+                parametrosProjeto = BuildLockedParameters(project);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DocumentGeneration] Falha ao montar parâmetros travados na regeneração");
+        }
+
         // Gerar novo prompt com novos inputs (usando versão simplificada em dev, completa em produção)
         string prompt;
         try
@@ -484,8 +568,9 @@ public class DocumentGenerationService : IDocumentGenerationService
                 prompt = PromptTemplates.GetPromptForStage(stage, newInputs);
             }
 
-            // Adicionar contexto acumulado ao prompt
+            // Adicionar contexto acumulado + parâmetros travados ao prompt
             prompt += contextPrompt;
+            prompt += parametrosProjeto;
         }
         catch (Exception ex)
         {
@@ -521,6 +606,20 @@ public class DocumentGenerationService : IDocumentGenerationService
         if (updatedTask == null)
         {
             return null;
+        }
+
+        // Spec 023: regenerar uma etapa a torna "atual" novamente (limpa outdated_at)
+        // e DESATUALIZA as posteriores concluídas (ponto único no StageService).
+        try
+        {
+            await ClearOutdatedAsync(taskId);
+            var stageIdx = ParseStageNumberLocal(updatedTask.Phase);
+            if (stageIdx > 0)
+                await _stageService.MarkLaterStagesOutdatedAsync(updatedTask.ProjectId, stageIdx);
+        }
+        catch (Exception exMark)
+        {
+            _logger.LogWarning(exMark, "[Outdated] Falha ao atualizar estado outdated após regenerar task {TaskId}", taskId);
         }
 
         // Criar novo registro de avaliação
@@ -696,8 +795,12 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
 
             // Fazer UPSERT no banco
             await _stageSummaryService.UpsertAsync(projectId, userId, stage, jsonDoc.RootElement, summaryText);
-            
+
             _logger.LogInformation("[DocumentGeneration] Resumo da etapa salvo com sucesso");
+
+            // Spec 027 — extrai variáveis financeiras das etapas 4/5 para a fonte de verdade.
+            // Tolerante a falha; não bloqueia a etapa.
+            await _financialVariableService.ExtractAndUpsertFromStageAsync(projectId, stage, extractedJson);
         }
         catch (Exception ex)
         {
@@ -757,6 +860,51 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
     /// (case-insensitive); 3) chamadores devem envolver o resultado em delimitadores
     /// XML (&lt;user_input&gt;...&lt;/user_input&gt;) ao montar o prompt.
     /// </summary>
+    /// <summary>
+    /// Monta o bloco de PARÂMETROS TRAVADOS do projeto que TODAS as etapas devem
+    /// respeitar (público-alvo, estrutura do produto, região). Só inclui campos
+    /// definidos explicitamente — "Não sei/prefiro não definir" e vazios são
+    /// ignorados (a IA fica livre nesses pontos). Retorna "" se nada foi definido.
+    /// </summary>
+    private string BuildLockedParameters(IdeorAI.Model.Entities.Project project)
+    {
+        bool IsDefined(string? v) =>
+            !string.IsNullOrWhiteSpace(v) &&
+            !v.Contains("Não sei", StringComparison.OrdinalIgnoreCase) &&
+            !v.Contains("prefiro não definir", StringComparison.OrdinalIgnoreCase);
+
+        var linhas = new List<string>();
+
+        if (IsDefined(project.TargetAudience))
+            linhas.Add($"- **Público-alvo:** {SanitizeInput(project.TargetAudience!)} — todo o desenvolvimento (modelo de negócio, canais, proposta de valor, MVP) DEVE ser coerente com esse público. NÃO sugira um público diferente.");
+
+        if (IsDefined(project.ProductStructure))
+            linhas.Add($"- **Estrutura do produto:** {SanitizeInput(project.ProductStructure!)} — mantenha esse formato em todas as etapas. NÃO proponha uma estrutura diferente.");
+
+        if (IsDefined(project.Region))
+            linhas.Add($"- **Região/mercado de lançamento:** {SanitizeInput(project.Region!)} — ancore métricas, moeda (R$) e concorrentes nessa região.");
+
+        if (IsDefined(project.Category))
+            linhas.Add($"- **Segmento:** {SanitizeInput(project.Category!)} — respeite o nicho escolhido.");
+
+        // Spec 028 — tags de contexto (palavras-chave) para ancorar o foco e reduzir
+        // a deriva da LLM. Sanitiza, descarta vazios e limita a 10.
+        var tags = (project.Keywords ?? new List<string>())
+            .Select(t => SanitizeInput(t ?? string.Empty))
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Take(10)
+            .ToList();
+        if (tags.Count > 0)
+            linhas.Add($"- **Foco do projeto (palavras-chave):** {string.Join(", ", tags)} — estas palavras resumem a essência do projeto; mantenha TODA a análise ancorada nelas e NÃO desvie para outros segmentos, temas ou produtos.");
+
+        if (linhas.Count == 0)
+            return "";
+
+        return "\n\n## PARÂMETROS DEFINIDOS PELO USUÁRIO (OBRIGATÓRIO RESPEITAR EM TODA A RESPOSTA)\n"
+             + string.Join("\n", linhas)
+             + "\nEstes parâmetros foram escolhidos pelo usuário e são inegociáveis. Qualquer recomendação que os contradiga é um erro.\n";
+    }
+
     private string SanitizeInput(string input)
     {
         if (string.IsNullOrEmpty(input))
@@ -782,5 +930,28 @@ Refine o documento acima incorporando o feedback do usuário. Mantenha a estrutu
             input = input.Replace(p, "");
 
         return input.Trim();
+    }
+
+    /// <summary>Spec 023: limpa o outdated_at de uma task (volta a "atual") após regeneração.</summary>
+    private async Task ClearOutdatedAsync(Guid taskId)
+    {
+        var resp = await _supabase
+            .From<TaskModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, taskId.ToString())
+            .Get();
+        var model = resp.Models?.FirstOrDefault();
+        if (model == null || model.OutdatedAt == null) return;
+
+        model.OutdatedAt = null;
+        model.Project = null;
+        model.IaEvaluations = null;
+        await _supabase.From<TaskModel>().Update(model);
+    }
+
+    private static int ParseStageNumberLocal(string? phase)
+    {
+        if (string.IsNullOrWhiteSpace(phase)) return 0;
+        var digits = new string(phase.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var num) ? num : 0;
     }
 }

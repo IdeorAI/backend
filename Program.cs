@@ -73,6 +73,8 @@ builder.Services.AddScoped<IScoreService, ScoreService>();
 builder.Services.AddScoped<IIvoService, IvoService>();
 builder.Services.AddSingleton<IBackgroundTaskRunner, BackgroundTaskRunner>();
 builder.Services.AddScoped<IGoPivotService, GoPivotService>();
+builder.Services.AddScoped<IFinancialSummaryService, FinancialSummaryService>();
+builder.Services.AddScoped<IFinancialVariableService, FinancialVariableService>();
 
 // Configuração do OpenTelemetry
 var resourceBuilder = ResourceBuilder.CreateDefault()
@@ -208,25 +210,35 @@ if (!string.IsNullOrEmpty(deepSeekApiKey))
     {
         client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", deepSeekApiKey);
+        // O HttpClient.Timeout envolve TODO o pipeline de resiliência (todas as
+        // tentativas + backoff). Se for menor que o TotalRequestTimeout do Polly
+        // (360s), ele corta o pipeline ANTES dos retries terminarem — era o que
+        // acontecia com 130s: a etapa4 (deepseek-v4-pro lento) gastava ~120s na 1ª
+        // tentativa e o retry estourava os 130s → 400 silencioso. Infinito = o Polly
+        // (AttemptTimeout + TotalRequestTimeout) é a ÚNICA autoridade de timeout.
+        client.Timeout = Timeout.InfiniteTimeSpan;
     })
     .AddStandardResilienceHandler(options =>
     {
-        // 3 retries com backoff exponencial + jitter (2s, 4s, 8s ± jitter)
-        options.Retry.MaxRetryAttempts = 3;
+        // 2 retries (3 tentativas) com backoff exponencial + jitter. Reduzido de 3→2
+        // porque cada tentativa agora pode levar até 120s (deepseek-v4-pro é lento em
+        // etapas pesadas, ex.: etapa4 Modelo de Negócio) — 3 retries × 120s estouraria.
+        options.Retry.MaxRetryAttempts = 2;
         options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
         options.Retry.UseJitter = true;
         options.Retry.Delay = TimeSpan.FromSeconds(2);
 
-        // Circuit breaker — SamplingDuration deve ser >= 2× AttemptTimeout (regra Polly v8)
-        // AttemptTimeout=60s → SamplingDuration >= 120s
+        // Circuit breaker — SamplingDuration deve ser >= 2× AttemptTimeout (regra Polly v8).
+        // AttemptTimeout=120s → SamplingDuration >= 240s.
         options.CircuitBreaker.MinimumThroughput = 5;
         options.CircuitBreaker.FailureRatio = 0.6;
-        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(240);
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
 
-        // Timeout por tentativa e timeout total (inclui todas as retentativas)
-        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
-        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(240);
+        // Timeout por tentativa (120s — etapas pesadas com o modelo pro cruzavam os 60s
+        // anteriores → 400). Total cobre as retentativas + backoff.
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(120);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(360);
     });
 
     builder.Services.AddSingleton<IdeorAI.Client.ILlmClient, IdeorAI.Client.DeepSeekClient>();

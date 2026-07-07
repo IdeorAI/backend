@@ -1,3 +1,5 @@
+using IdeorAI.Model.Entities;
+
 namespace IdeorAI.Services;
 
 /// <summary>
@@ -6,17 +8,32 @@ namespace IdeorAI.Services;
 public static class PromptTemplates
 {
     /// <summary>
+    /// Premissas globais aplicadas a TODAS as etapas. Garante idioma, moeda,
+    /// respeito ao segmento e embasamento dos números (sem inventar URLs —
+    /// o modelo não acessa a internet).
+    /// </summary>
+    public const string PremissasGlobais = @"## Premissas obrigatórias (válidas para toda a resposta)
+- Responda SEMPRE e INTEGRALMENTE em português do Brasil (pt-BR), mesmo que a região-alvo seja um país de outro idioma (ex.: Argentina, China). A região indica apenas o MERCADO-ALVO — nunca o idioma da resposta. NUNCA escreva em espanhol/inglês.
+- Use SEMPRE o Real (R$) como moeda base em qualquer valor ou projeção.
+- Respeite rigorosamente o segmento/mercado informado pelo usuário — não troque de nicho.
+- Adapte análise, concorrentes, custos e projeções à REGIÃO/PAÍS-ALVO informado pelo usuário (não assuma Brasil por padrão se outra região foi indicada).
+- Para todo número, projeção ou estimativa: declare a BASE DE CÁLCULO e a PREMISSA usada (ex.: ""estimativa baseada em ticket médio de SaaS B2B na região-alvo, faixa R$ X–Y""). Quando não houver base sólida, marque explicitamente como ""estimativa a validar"".
+- Você pode citar fontes ou benchmarks conhecidos pelo NOME (ex.: relatórios da ABStartups, Distrito, Sebrae, Crunchbase) quando forem pertinentes — mas NUNCA invente URLs ou links específicos. Não fabrique dados.
+";
+
+    /// <summary>
     /// Etapa 1: Problema e Oportunidade
     /// </summary>
     public static string Etapa1ProblemaOportunidade(Dictionary<string, string> inputs)
     {
         var ideia = inputs.GetValueOrDefault("ideia", "[não fornecido]");
         var mercado = inputs.GetValueOrDefault("mercado", "[não especificado]");
-        var regiao = inputs.GetValueOrDefault("regiao", "Brasil");
+        var regiao = inputs.GetValueOrDefault("regiao", "[não especificado — assuma um mercado genérico]");
         var recursos = inputs.GetValueOrDefault("recursos", "[não especificado]");
 
         return $@"Você é um **estrategista de Customer Development e Lean Startup**. Sua missão é **conduzir integralmente a etapa ""Ideação e Problema""** de uma startup, evitando o risco de ""solução em busca de problema"" e entregando **insights prontos para uso**.
 
+{PremissasGlobais}
 ## **Contexto do projeto**
 
 * **Ideia inicial:** {ideia}
@@ -168,7 +185,7 @@ Para cada persona:
 /// </summary>
 public static string Etapa2PesquisaMercado(Dictionary<string, string> inputs)
 {
-var regiao = inputs.GetValueOrDefault("regiao", "Brasil");
+var regiao = inputs.GetValueOrDefault("regiao", "[não especificado — assuma um mercado genérico]");
 var segmento = inputs.GetValueOrDefault("segmento", "[não especificado]");
 var ideiaBase = inputs.GetValueOrDefault("ideia", "[não fornecido]");
 var contextoAcumulado = inputs.GetValueOrDefault("contexto_acumulado", "");
@@ -180,9 +197,19 @@ var contextoSection = string.IsNullOrEmpty(contextoAcumulado)
 {contextoAcumulado}
 ";
 
-return $@"Você é um analista de mercado especializado em startups early-stage.
+return $@"Você é um **analista de mercado especializado em startups**. Sua missão é **conduzir integralmente a etapa de Pesquisa de Mercado**, produzindo um relatório estruturado, prático e pronto para uso que permita entender a oportunidade, os players existentes e as práticas atuais.
 
-A partir da análise inicial abaixo, aprofunde o mapeamento competitivo. Foque no que é usado na prática, não em teoria. Cite soluções reais com nomes quando possível.
+{PremissasGlobais}
+## Objetivos desta interação
+1. Mapear tamanho do mercado e oportunidade (TAM, SAM, SOM quando possível — sempre com a premissa de cálculo declarada).
+2. Identificar principais players, concorrentes diretos e indiretos, com benchmark de práticas.
+3. Levantar alternativas já usadas pelo público (soluções concorrentes, processos substitutos).
+4. Produzir insights acionáveis sobre barreiras, tendências e boas práticas.
+
+## Instruções de execução
+- Foque no que é usado na prática, não em teoria. Cite soluções reais com nomes quando possível.
+- Traga dados de mercado (estimativas, percentuais, valores em R$) sempre com a base de cálculo. Se não houver dado direto, use proxies de segmentos comparáveis e marque como ""estimativa a validar"".
+- Para cada concorrente, aponte pontos fortes, fracos e diferenciais.
 {contextoSection}
 ## Input do Usuário
 
@@ -262,8 +289,9 @@ Retorne JSON:
 Use esse contexto — especialmente a análise competitiva e as dores mapeadas — para tornar a proposta de valor específica e diferenciada.
 ";
 
-        return $@"Você é um **especialista em Value Proposition Canvas e posicionamento competitivo**. Construa uma proposta de valor concreta para a startup abaixo.
+        return $@"Você é um **estrategista de produto** aplicando **Value Proposition Canvas** e **Jobs To Be Done (JTBD)** para redigir a Proposta de Valor inicial (v1) de uma startup em pré-seed. O resultado deve ser claro, mensurável e comparável às alternativas existentes.
 
+{PremissasGlobais}
 ## Ideia
 {ideia}
 {contextoSection}
@@ -330,7 +358,13 @@ Retorne JSON:
 Use esse contexto — especialmente métricas de mercado, ticket médio e proposta de valor — para tornar as projeções financeiras realistas e ancoradas.
 ";
 
-        return $@"Você é um **consultor de Business Model Canvas e modelagem financeira para startups**. Construa o modelo de negócio completo e projeções realistas.
+        return $@"Atue como um **estrategista de produto na fase de modelagem de negócio**. Sua missão é estruturar, analisar e documentar hipóteses de modelo de negócio usando frameworks consagrados (Business Model Canvas, Lean Canvas, JTBD, Value Proposition Canvas) e boas práticas de validação.
+
+{PremissasGlobais}
+## Critérios de qualidade
+- **Comparação:** sempre relacione hipóteses ao que já existe no mercado — inclua ao menos 2 benchmarks de modelos semelhantes (cite pelo nome, sem inventar URLs).
+- **Consistência:** alinhe o modelo às dores e validações das etapas anteriores.
+- **Viabilidade:** sinalize os pontos críticos que dependem de mais teste/validação.
 
 ## Ideia
 {ideia}
@@ -391,7 +425,7 @@ Retorne JSON:
 }}
 ```
 
-**IMPORTANTE:** Retorne APENAS o JSON válido.";
+**IMPORTANTE:** Retorne APENAS o JSON válido, sem comentários.";
     }
 
     /// <summary>
@@ -411,7 +445,15 @@ Retorne JSON:
 Use esse contexto — especialmente as funcionalidades da proposta de valor e o modelo de negócio — para definir um MVP que valide as hipóteses mais críticas primeiro.
 ";
 
-        return $@"Você é um **Product Manager especializado em MVPs Lean**. Defina o MVP mínimo viável que valida as hipóteses mais importantes com o menor esforço.
+        return $@"Você é um **estrategista de produto e inovação** aplicando **Lean Startup e Product Discovery**. Sua missão é transformar as hipóteses de valor e de modelo de negócio em uma proposta concreta de MVP — simples, validável e alinhada aos recursos disponíveis.
+
+{PremissasGlobais}
+## Objetivos desta interação
+1. Selecionar as funcionalidades núcleo (core features) indispensáveis para validar a proposta.
+2. Mapear o fluxo mínimo de funcionamento do MVP.
+3. Separar claramente ""must-have"" (crítico) de ""nice-to-have"" (adiável).
+4. Definir hipóteses a testar e métricas-chave de validação (engajamento, retenção, conversão).
+5. Sugerir alternativas de execução (no-code, protótipo navegável, concierge, landing page) quando couber.
 
 ## Ideia
 {ideia}
@@ -420,7 +462,7 @@ Use esse contexto — especialmente as funcionalidades da proposta de valor e o 
 - O MVP deve ser o menor escopo possível para validar a hipótese central de negócio.
 - `core_features` deve ter no máximo 3-5 funcionalidades — prefira menos e mais foco.
 - O `roadmap_3_meses` deve ser um array com 3 objetos (um por mês), cada um com objetivo claro e entregas concretas.
-- `custo_desenvolvimento` deve ser realista para o Brasil (freelancers ou agências nacionais).
+- `custo_desenvolvimento` deve ser o MENOR custo viável para validar as hipóteses (não um produto completo): priorize no-code/low-code, ferramentas gratuitas/open-source, MVP manual ou freelancer único. Realista para a região-alvo (use o contexto; ex.: freelancers locais), na moeda R$, estimando o mínimo possível.
 - As `metricas_validacao` devem ser métricas de negócio (conversão, retenção, receita), não apenas técnicas.
 
 Retorne JSON com exatamente esta estrutura:
@@ -445,13 +487,6 @@ Retorne JSON com exatamente esta estrutura:
     {{ ""mes"": 2, ""objetivo"": ""[objetivo do mês 2]"", ""entregas"": [""[entrega 1]"", ""[entrega 2]""] }},
     {{ ""mes"": 3, ""objetivo"": ""[objetivo do mês 3]"", ""entregas"": [""[entrega 1]"", ""[entrega 2]""] }}
   ],
-  ""stack_tecnologica"": {{
-    ""frontend"": ""[tecnologia recomendada]"",
-    ""backend"": ""[tecnologia recomendada]"",
-    ""database"": ""[banco de dados]"",
-    ""infra"": ""[cloud/hosting]"",
-    ""justificativa"": ""[por que essa stack para esse contexto]""
-  }},
   ""metricas_validacao"": [
     {{ ""metrica"": ""[nome da métrica de negócio]"", ""meta"": ""[valor alvo]"", ""motivo"": ""[por que essa métrica prova validação]"" }},
     {{ ""metrica"": ""[métrica 2]"", ""meta"": ""[valor]"", ""motivo"": ""[motivo]"" }},
@@ -482,6 +517,7 @@ Retorne JSON com exatamente esta estrutura:
 
         return $@"Você é um **consultor de formação de equipes de startups**. Defina a equipe mínima necessária.
 
+{PremissasGlobais}
 ## **Contexto**
 - **MVP:** {mvp}
 - **Fase:** {fase}
@@ -543,6 +579,7 @@ Retorne JSON:
 
         return $@"Você é um **consultor de pitch decks e planos executivos para startups**. Consolide todas as etapas anteriores.
 
+{PremissasGlobais}
 ## **Contexto**
 - **Nome do Projeto:** {nomeProjeto}
 - **Etapas anteriores:** {etapasAnteriores}
@@ -652,5 +689,279 @@ Retorne JSON:
             "etapa7" => Etapa7PitchPlanoResumo(inputs),
             _ => throw new ArgumentException($"Stage '{stage}' não reconhecido")
         };
+    }
+
+    /// <summary>
+    /// Spec 029 — Gera Prompt Master para Vibe Coding (Lovable, v0, Bolt, etc.)
+    /// Monta o prompt diretamente a partir dos dados do projeto e tasks, sem chamar LLM.
+    /// </summary>
+    public static string GenerateMvpPromptMaster(Project project, List<ProjectTask> tasks)
+    {
+        if (project == null) throw new ArgumentNullException(nameof(project));
+
+        var sb = new System.Text.StringBuilder();
+
+        // Header do Prompt Master
+        sb.AppendLine("# Prompt Master: " + project.Name);
+        sb.AppendLine();
+        sb.AppendLine("**Gerado por IdeorAI** — Data: " + DateTime.Now.ToString("yyyy-MM-dd"));
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+
+        // 1. Visão e Contexto do Produto
+        sb.AppendLine("## 1. Visão e Contexto do Produto");
+        sb.AppendLine();
+        sb.AppendLine("### Visão");
+        sb.AppendLine(project.Description ?? "[Descrição não fornecida]");
+        sb.AppendLine();
+        sb.AppendLine("### Categoria");
+        sb.AppendLine(project.Category ?? "[Categoria não definida]");
+        sb.AppendLine();
+        sb.AppendLine("### Estrutura do Produto");
+        sb.AppendLine(project.ProductStructure ?? "[Estrutura não definida]");
+        sb.AppendLine();
+        sb.AppendLine("### Região de Atuação");
+        sb.AppendLine(project.Region ?? "[Região não definida]");
+        sb.AppendLine();
+        sb.AppendLine("### Restrições");
+        sb.AppendLine(project.Constraints ?? "[Nenhuma restrição informada]");
+        sb.AppendLine();
+        sb.AppendLine("### Tags de Contexto");
+        if (project.Keywords != null && project.Keywords.Count > 0)
+            sb.AppendLine("- " + string.Join("\n- ", project.Keywords));
+        else
+            sb.AppendLine("[Nenhuma tag definida]");
+        sb.AppendLine();
+
+        // 2. Usuários e Papéis
+        sb.AppendLine("## 2. Usuários e Papéis");
+        sb.AppendLine();
+        sb.AppendLine("### Público-Alvo");
+        sb.AppendLine(project.TargetAudience ?? "[Público-alvo não definido]");
+        sb.AppendLine();
+
+        // Extrair personas das tasks
+        var etapa3 = tasks.FirstOrDefault(t => t.Phase == "etapa3" && t.Status == "evaluated");
+        if (etapa3 != null && !string.IsNullOrEmpty(etapa3.Content))
+        {
+            try
+            {
+                var etapa3Json = Newtonsoft.Json.Linq.JObject.Parse(etapa3.Content);
+                var personas = etapa3Json["personas"];
+                if (personas != null)
+                {
+                    sb.AppendLine("### Personas");
+                    foreach (var persona in personas)
+                    {
+                        var nome = persona["nome"]?.ToString() ?? "[Nome]";
+                        var perfil = persona["perfil"]?.ToString() ?? "[Perfil]";
+                        var dores = persona["dores"]?.ToString() ?? "[Dores]";
+                        var objetivos = persona["objetivos"]?.ToString() ?? "[Objetivos]";
+                        sb.AppendLine($"#### {nome}");
+                        sb.AppendLine($"- **Perfil:** {perfil}");
+                        sb.AppendLine($"- **Dores:** {dores}");
+                        sb.AppendLine($"- **Objetivos:** {objetivos}");
+                        sb.AppendLine();
+                    }
+                }
+            }
+            catch { sb.AppendLine("[Erro ao processar personas]"); }
+        }
+        else
+        {
+            sb.AppendLine("[Personas não definidas — complete a Etapa 3]");
+        }
+        sb.AppendLine();
+
+        // 3. Funcionalidades
+        sb.AppendLine("## 3. Funcionalidades");
+        sb.AppendLine();
+
+        var etapa5 = tasks.FirstOrDefault(t => t.Phase == "etapa5" && t.Status == "evaluated");
+        if (etapa5 != null && !string.IsNullOrEmpty(etapa5.Content))
+        {
+            try
+            {
+                var etapa5Json = Newtonsoft.Json.Linq.JObject.Parse(etapa5.Content);
+                var funcionalidades = etapa5Json["funcionalidades_mvp"];
+                if (funcionalidades != null)
+                {
+                    sb.AppendLine("### MVP (Funcionalidades Essenciais)");
+                    foreach (var func in funcionalidades)
+                    {
+                        var nome = func["nome"]?.ToString() ?? "[Nome]";
+                        var desc = func["descricao"]?.ToString() ?? "[Descrição]";
+                        var prioridade = func["prioridade"]?.ToString() ?? "alta";
+                        sb.AppendLine($"- **{nome}** (prioridade: {prioridade}): {desc}");
+                    }
+                    sb.AppendLine();
+                }
+            }
+            catch { sb.AppendLine("[Erro ao processar funcionalidades]"); }
+        }
+        else
+        {
+            sb.AppendLine("[Funcionalidades não definidas — complete a Etapa 5]");
+        }
+        sb.AppendLine();
+
+        // 4. Fluxos e Telas (MVP)
+        sb.AppendLine("## 4. Fluxos e Telas (MVP)");
+        sb.AppendLine();
+        if (etapa5 != null && !string.IsNullOrEmpty(etapa5.Content))
+        {
+            try
+            {
+                var etapa5Json = Newtonsoft.Json.Linq.JObject.Parse(etapa5.Content);
+                var fluxos = etapa5Json["fluxos_usuario"];
+                if (fluxos != null)
+                {
+                    sb.AppendLine("### Fluxos Principais");
+                    foreach (var fluxo in fluxos)
+                    {
+                        var nome = fluxo["nome"]?.ToString() ?? "[Nome]";
+                        var passos = fluxo["passos"];
+                        sb.AppendLine($"#### {nome}");
+                        if (passos != null)
+                        {
+                            foreach (var passo in passos)
+                            {
+                                sb.AppendLine($"  {passo}");
+                            }
+                        }
+                        sb.AppendLine();
+                    }
+                }
+            }
+            catch { sb.AppendLine("[Erro ao processar fluxos]"); }
+        }
+        else
+        {
+            sb.AppendLine("[Fluxos não definidos — complete a Etapa 5]");
+        }
+        sb.AppendLine();
+
+        // 5. Componentes Reutilizáveis
+        sb.AppendLine("## 5. Componentes Reutilizáveis");
+        sb.AppendLine();
+        sb.AppendLine("Os seguintes componentes devem ser reutilizados em todo o produto:");
+        sb.AppendLine();
+        sb.AppendLine("- **Cards** — para exibição de informações agrupadas");
+        sb.AppendLine("- **Formulários** — com validação e feedback visual");
+        sb.AppendLine("- **Tabelas** — para listagens e dados tabulares");
+        sb.AppendLine("- **Modais** — para diálogos e ações secundárias");
+        sb.AppendLine("- **Toasts/Notificações** — feedback de sucesso/erro");
+        sb.AppendLine("- **Skeletons** — estados de loading");
+        sb.AppendLine();
+
+        // 6. Arquitetura Técnica
+        sb.AppendLine("## 6. Arquitetura Técnica");
+        sb.AppendLine();
+        sb.AppendLine("### Front-end");
+        sb.AppendLine("Sugestão: Next.js 15 (App Router) + React + TypeScript + Tailwind CSS + shadcn/ui");
+        sb.AppendLine();
+        sb.AppendLine("### Back-end");
+        sb.AppendLine("Sugestão: ASP.NET Core 9.0 + C# + Supabase (PostgreSQL)");
+        sb.AppendLine();
+        sb.AppendLine("### Autenticação");
+        sb.AppendLine("Sugestão: Supabase Auth (Email + Google OAuth)");
+        sb.AppendLine();
+        sb.AppendLine("### Storage");
+        sb.AppendLine("Sugestão: Supabase Storage para arquivos, imagens e documentos");
+        sb.AppendLine();
+
+        // 7. Modelagem de Dados
+        sb.AppendLine("## 7. Modelagem de Dados (Sugestão)");
+        sb.AppendLine();
+        sb.AppendLine("### Entidades Principais");
+        sb.AppendLine();
+        sb.AppendLine("- **users** — usuários do sistema");
+        sb.AppendLine("- **projects** — projetos/empresas");
+        sb.AppendLine("- **tasks** — tarefas/etapas");
+        sb.AppendLine("- **documents** — documentos gerados");
+        sb.AppendLine();
+        sb.AppendLine("Nota: Esta é uma sugestão inicial. Ajuste conforme requisitos específicos.");
+        sb.AppendLine();
+
+        // 8. Integrações
+        sb.AppendLine("## 8. Integrações");
+        sb.AppendLine();
+        sb.AppendLine("- **IA/LLM** — para geração de conteúdo (DeepSeek, Gemini)");
+        sb.AppendLine("- **Email** — notificações transacionais");
+        sb.AppendLine("- **Analytics** — rastreamento de uso e eventos");
+        sb.AppendLine();
+
+        // 9. UX e Design
+        sb.AppendLine("## 9. UX e Design");
+        sb.AppendLine();
+        sb.AppendLine("### Identidade Visual");
+        sb.AppendLine("- **Paleta:** Cores sóbrias, professional");
+        sb.AppendLine("- **Tipografia:** Sans-serif moderna (Inter, Geist)");
+        sb.AppendLine("- **Responsividade:** Mobile-first");
+        sb.AppendLine();
+        sb.AppendLine("### Design System");
+        sb.AppendLine("Reutilizar componentes do shadcn/ui ou biblioteca equivalente.");
+        sb.AppendLine();
+
+        // 10. Segurança
+        sb.AppendLine("## 10. Segurança");
+        sb.AppendLine();
+        sb.AppendLine("- **Autenticação:** JWT via Supabase Auth");
+        sb.AppendLine("- **Autorização:** RLS (Row Level Security) no PostgreSQL");
+        sb.AppendLine("- **Proteção de dados:** Criptografia em trânsito (TLS)");
+        sb.AppendLine("- **LGPD/GDPR:** Conformidade com proteção de dados");
+        sb.AppendLine("- **Rate limiting:** Limitar requisições por usuário");
+        sb.AppendLine("- **Logs:** Auditoria de ações críticas");
+        sb.AppendLine();
+
+        // 11. Estratégia e Qualidade
+        sb.AppendLine("## 11. Estratégia e Qualidade");
+        sb.AppendLine();
+        sb.AppendLine("### Desenvolvimento");
+        sb.AppendLine("- Implemente em pequenas etapas iterativas");
+        sb.AppendLine("- Valide cada etapa antes da próxima");
+        sb.AppendLine("- Reutilize componentes sempre que possível");
+        sb.AppendLine("- Preserve consistência arquitetural");
+        sb.AppendLine();
+        sb.AppendLine("### Princípios de Qualidade");
+        sb.AppendLine("- **Arquitetura limpa:** Baixo acoplamento, alta coesão");
+        sb.AppendLine("- **Escalabilidade:** Prepare para crescimento");
+        sb.AppendLine("- **Performance:** Otimização de carregamento");
+        sb.AppendLine("- **Manutenibilidade:** Código legível e documentado");
+        sb.AppendLine();
+
+        // 12. Restrições
+        sb.AppendLine("## 12. Restrições (O que NÃO fazer)");
+        sb.AppendLine();
+        sb.AppendLine("- ❌ **Não inventar funcionalidades** não especificadas");
+        sb.AppendLine("- ❌ **Não assumir requisitos** inexistentes");
+        sb.AppendLine("- ❌ **Não criar integrações** não documentadas");
+        sb.AppendLine("- ❌ **Não alterar regras de negócio** estabelecidas");
+        sb.AppendLine("- ❌ **Não modificar componentes** compartilhados sem motivo");
+        sb.AppendLine("- ❌ **Não remover funcionalidades** existentes");
+        sb.AppendLine();
+
+        // 13. Checkpoint Obrigatório
+        sb.AppendLine("## 13. Checkpoint Obrigatório (ANTES de Implementar)");
+        sb.AppendLine();
+        sb.AppendLine("> **INTERROMPA E PERGUNTE** se houver qualquer requisito ambíguo, inconsistente, conflitante ou insuficiente.");
+        sb.AppendLine(">");
+        sb.AppendLine("> **Não faça suposições.**");
+        sb.AppendLine("> **Não implemente baseado em interpretações.**");
+        sb.AppendLine(">");
+        sb.AppendLine("> Só inicie o desenvolvimento após clareza **TOTAL** sobre os requisitos.");
+        sb.AppendLine();
+
+        // Footer
+        sb.AppendLine("---");
+        sb.AppendLine();
+        sb.AppendLine("*Este Prompt Master foi gerado automaticamente pela plataforma IdeorAI.*");
+        sb.AppendLine();
+        sb.AppendLine("**Para uso em:** Lovable, v0, Bolt, Replit AI, Cursor, Firebase Studio ou plataformas equivalentes.");
+        sb.AppendLine();
+        sb.AppendLine("**OUTPUT:** Este é o documento completo — pronto para copiar e colar.");
+
+        return sb.ToString();
     }
 }

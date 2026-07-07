@@ -59,6 +59,18 @@ public class ProjectModel : BaseModel
     [Column("constraints")]
     public string? Constraints { get; set; }
 
+    // Spec 028 — tags de contexto (reusa a coluna keywords text[]); injetadas no
+    // prompt das etapas da Fase 2 para ancorar a LLM.
+    [Column("keywords")]
+    public List<string>? Keywords { get; set; }
+
+    // Spec 025 — onboarding: modo de trabalho (compartilhado com Spec 024) e tipo de negócio
+    [Column("creation_mode")]
+    public string CreationMode { get; set; } = "ai";
+
+    [Column("business_type")]
+    public string? BusinessType { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
 

@@ -5,7 +5,10 @@ public record LlmOptions(
     int MaxTokens = 8000,
     bool SkipCentralMetrics = false,
     string? UserId = null,
-    string? SourceContext = null);
+    string? SourceContext = null,
+    // Override do modelo por chamada (roteamento híbrido). null = usa o default
+    // do appsettings (DeepSeek:Model). Ex.: "deepseek-v4-pro" nas etapas analíticas.
+    string? Model = null);
 
 public record LlmResult(
     string Text,

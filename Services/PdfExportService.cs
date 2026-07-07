@@ -650,6 +650,27 @@ public class PdfExportService : IPdfExportService
         var projectName = project.Name ?? "Projeto";
         var markdown = doc.ContentMd ?? string.Empty;
 
+        // Carrega a DRE da task resumo_financeiro (só relevante para business-plan).
+        JsonElement? dreForPdf = null;
+        if (docType == "business-plan")
+        {
+            try
+            {
+                var finResp = await _supabase
+                    .From<TaskModel>()
+                    .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+                    .Filter("phase", Supabase.Postgrest.Constants.Operator.Equals, "resumo_financeiro")
+                    .Order("created_at", Supabase.Postgrest.Constants.Ordering.Descending)
+                    .Limit(1)
+                    .Get();
+                dreForPdf = DreCalculator.TryExtractDre(finResp.Models?.FirstOrDefault()?.Content);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[FinalDocPdf] Falha ao carregar DRE para o PDF do business-plan project {ProjectId}", projectId);
+            }
+        }
+
         var document = Document.Create(container =>
         {
             container.Page(page =>
@@ -667,10 +688,103 @@ public class PdfExportService : IPdfExportService
                     col.Item().Text(projectName).FontSize(12).Medium().FontColor(Colors.Grey.Darken1);
                 });
 
+                // Spec 022 v2: no Plano de Negócios, anexar a tabela DRE (Resumo Financeiro),
+                // se o projeto já o gerou. Degradação graciosa: sem DRE, nada é anexado.
+                var dreElement = docType == "business-plan" ? dreForPdf : null;
+
                 page.Content().PaddingVertical(0.6f, Unit.Centimetre).Column(column =>
                 {
                     column.Spacing(10);
                     RenderMarkdownBlocks(column, markdown);
+
+                    if (dreElement != null)
+                    {
+                        column.Item().PaddingTop(12).Text("Demonstração de Resultado (DRE) — Projeção 12 meses")
+                            .FontSize(13).Bold().FontColor(IdeorPurple);
+                        column.Item().PaddingTop(4).Element(c => RenderDreTable(c, dreElement.Value));
+                    }
+                });
+
+                page.Footer().Row(row =>
+                {
+                    row.RelativeItem().Text(text =>
+                    {
+                        text.DefaultTextStyle(s => s.FontSize(9).FontColor(Colors.Grey.Medium));
+                        text.Span("Página ");
+                        text.CurrentPageNumber();
+                        text.Span(" de ");
+                        text.TotalPages();
+                    });
+                    row.RelativeItem().AlignRight().Text("IdeorAI - ideoria.ai")
+                        .FontSize(9).FontColor(Colors.Grey.Medium);
+                });
+            });
+        });
+
+        return document.GeneratePdf();
+    }
+
+    /// <summary>
+    /// Spec 022 — PDF SÓ do Resumo Financeiro (tabela DRE atualizada).
+    /// Lê a task resumo_financeiro e renderiza a DRE via RenderDreTable.
+    /// </summary>
+    public async Task<byte[]> GenerateFinancialSummaryPdfAsync(string projectId, string userId, CancellationToken ct)
+    {
+        _logger.LogInformation("[FinSummaryPdf] project {ProjectId}", projectId);
+
+        // .Single() lança exceção bruta (→ 500) se 0 linhas. Usar Get()+FirstOrDefault()
+        // e lançar KeyNotFoundException explícito (→ 404), como no resto do método.
+        var projectResp = await _supabase
+            .From<ProjectModel>()
+            .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Limit(1)
+            .Get();
+        var project = projectResp.Models?.FirstOrDefault();
+
+        if (project == null)
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        if (!string.Equals(project.OwnerId, userId, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("User is not owner of this project");
+
+        // Carrega a DRE da task resumo_financeiro (mais recente).
+        var finResp = await _supabase
+            .From<TaskModel>()
+            .Filter("project_id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+            .Filter("phase", Supabase.Postgrest.Constants.Operator.Equals, "resumo_financeiro")
+            .Order("created_at", Supabase.Postgrest.Constants.Ordering.Descending)
+            .Limit(1)
+            .Get();
+
+        var dre = DreCalculator.TryExtractDre(finResp.Models?.FirstOrDefault()?.Content);
+        if (dre == null)
+            throw new KeyNotFoundException($"Resumo Financeiro não gerado para project {projectId}");
+
+        var projectName = project.Name ?? "Projeto";
+        var dreValue = dre.Value;
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4.Landscape());
+                page.Margin(1.5f, Unit.Centimetre);
+                page.PageColor(Colors.White);
+                page.DefaultTextStyle(x => x.FontSize(11).FontColor(Colors.Grey.Darken4));
+
+                page.Header().Column(col =>
+                {
+                    col.Spacing(2);
+                    col.Item().Text("IdeorAI").FontSize(14).Bold().FontColor(IdeorPurple);
+                    col.Item().Text("Resumo Financeiro").FontSize(20).Bold().FontColor(Colors.Grey.Darken4);
+                    col.Item().Text(projectName).FontSize(12).Medium().FontColor(Colors.Grey.Darken1);
+                });
+
+                page.Content().PaddingVertical(0.6f, Unit.Centimetre).Column(column =>
+                {
+                    column.Spacing(10);
+                    column.Item().Text("Demonstração de Resultado (DRE) — Projeção 12 meses")
+                        .FontSize(13).Bold().FontColor(IdeorPurple);
+                    column.Item().PaddingTop(4).Element(c => RenderDreTable(c, dreValue));
                 });
 
                 page.Footer().Row(row =>
@@ -711,6 +825,83 @@ public class PdfExportService : IPdfExportService
             text.Span(content.Substring(lastIdx)).FontSize(fontSize);
         }
     }
+
+    /// <summary>
+    /// Renderiza a tabela DRE (descrição + 12 meses) no PDF via QuestPDF.
+    /// Fonte compacta para caber em A4 retrato; linhas de total em negrito/realçadas.
+    /// Valores em milhares de R$ (ex.: "12,5k") para reduzir largura.
+    /// </summary>
+    private void RenderDreTable(IContainer container, JsonElement dre)
+    {
+        var linhas = DreCalculator.BuildLinhasView(dre);
+        if (linhas == null || linhas.Count == 0)
+        {
+            container.Text("Projeção financeira indisponível.").FontSize(9).Italic().FontColor(Colors.Grey.Medium);
+            return;
+        }
+
+        const float fs = 6.5f;
+
+        // O `container` é single-child (vem de .Element(...)). Atribuir Table E Text
+        // direto nele lança DocumentComposeException ("multiple child elements to a
+        // single-child container"). Envolvemos os dois num Column, que aceita N filhos.
+        container.Column(col =>
+        {
+            col.Spacing(4);
+
+            col.Item().Table(table =>
+            {
+                table.ColumnsDefinition(cols =>
+                {
+                    cols.RelativeColumn(3.2f); // descrição
+                    for (var m = 0; m < 12; m++) cols.RelativeColumn(1f);
+                });
+
+                // Cabeçalho.
+                table.Header(header =>
+                {
+                    header.Cell().Element(HeaderCell).AlignLeft().Text("Conta").FontSize(fs).Bold().FontColor(Colors.White);
+                    for (var m = 1; m <= 12; m++)
+                        header.Cell().Element(HeaderCell).AlignRight().Text($"M{m}").FontSize(fs).Bold().FontColor(Colors.White);
+                });
+
+                foreach (var l in linhas)
+                {
+                    var isTotal = string.Equals(l.Tipo, "calculado", StringComparison.OrdinalIgnoreCase);
+                    var desc = table.Cell().Element(c => BodyCell(c, isTotal)).AlignLeft()
+                        .Text(l.Descricao).FontSize(fs);
+                    if (isTotal) desc.Bold();
+
+                    foreach (var v in l.Valores)
+                    {
+                        var cell = table.Cell().Element(c => BodyCell(c, isTotal)).AlignRight()
+                            .Text(FormatK(v)).FontSize(fs)
+                            .FontColor(v < 0 ? Colors.Red.Medium : Colors.Grey.Darken3);
+                        if (isTotal) cell.Bold();
+                    }
+                }
+            });
+
+            col.Item().Text("Valores em milhares de R$ (k). Projeção para os 12 primeiros meses.")
+                .FontSize(7).Italic().FontColor(Colors.Grey.Medium);
+        });
+
+        static IContainer HeaderCell(IContainer c) =>
+            c.Background(IdeorPurple).PaddingVertical(2).PaddingHorizontal(2);
+
+        static IContainer BodyCell(IContainer c, bool isTotal) =>
+            c.Background(isTotal ? Colors.Grey.Lighten3 : Colors.White)
+             .BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2)
+             .PaddingVertical(1.5f).PaddingHorizontal(2);
+    }
+
+    /// <summary>Formata um valor em milhares (ex.: 12500 → "12,5k", 0 → "0").</summary>
+    private static string FormatK(decimal v)
+    {
+        if (v == 0) return "0";
+        var k = v / 1000m;
+        return k.ToString("0.#", CultureInfo.GetCultureInfo("pt-BR")) + "k";
+    }
 }
 
 /// <summary>
@@ -722,4 +913,5 @@ public interface IPdfExportService
     Task<byte[]?> ExportSinglePhaseDocumentAsync(Guid projectId, Guid userId, string phase);
     Task<byte[]> GenerateStagePdfAsync(string projectId, string taskId, string userId, CancellationToken ct);
     Task<byte[]> GenerateFinalDocumentPdfAsync(string projectId, string docType, string userId, CancellationToken ct);
+    Task<byte[]> GenerateFinancialSummaryPdfAsync(string projectId, string userId, CancellationToken ct);
 }

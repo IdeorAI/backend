@@ -1,4 +1,5 @@
 using IdeorAI.Model.DTOs;
+using IdeorAI.Model.Entities;
 using IdeorAI.Model.SupabaseModels;
 using IdeorAI.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -270,7 +271,7 @@ public class DocumentsController : ControllerBase
     /// Gera PDF de uma etapa específica (Spec 018) — markdown-aware,
     /// header IdeorAI + projeto + etapa, footer paginação.
     /// </summary>
-    [HttpPost("~/api/projects/{projectId}/tasks/{taskId}/pdf")]
+    [HttpPost("tasks/{taskId}/pdf")]
     public async Task<IActionResult> DownloadStagePdf(
         string projectId,
         string taskId,
@@ -292,6 +293,48 @@ public class DocumentsController : ControllerBase
             _logger.LogError(ex, "[StagePdf] Erro gerando PDF para project {ProjectId} task {TaskId}", projectId, taskId);
             return StatusCode(500, new { error = "Erro ao gerar PDF" });
         }
+    }
+
+    /// <summary>
+    /// Spec 029 — Gera Prompt Master para Vibe Coding (Lovable, v0, Bolt, etc.)
+    /// Retorna Markdown pronto para copiar e colar em plataformas de desenvolvimento por IA.
+    /// Requer role owner ou editor.
+    /// </summary>
+    [HttpGet("{projectId}/mvp-prompt")]
+    public async Task<ActionResult<string>> GenerateMvpPromptMaster(
+        Guid projectId,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        var (allowed, effectiveUserId) = await RequireEditorAsync(projectId, userId);
+        if (!allowed)
+        {
+            return StatusCode(403, new { error = "Você precisa ser editor ou dono do projeto para exportar o Prompt Master." });
+        }
+
+        _logger.LogInformation("Generating MVP Prompt Master for project {ProjectId} (user={UserId})", projectId, userId);
+
+        // Buscar projeto
+        var project = await _projectService.GetByIdAsync(projectId, effectiveUserId);
+        if (project == null)
+        {
+            return NotFound(new { error = "Projeto não encontrado" });
+        }
+
+        // Buscar tasks do projeto (etapas 1-5)
+        var tasks = await _stageService.GetProjectTasksAsync(projectId, effectiveUserId);
+        var evaluatedTasks = tasks?
+            .Where(t => t.Status == "evaluated" && (t.Phase?.StartsWith("etapa") ?? false))
+            .OrderBy(t => t.Phase)
+            .ToList() ?? new List<ProjectTask>();
+
+        // Gerar Prompt Master (montagem direta, sem LLM)
+        var promptMaster = PromptTemplates.GenerateMvpPromptMaster(project, evaluatedTasks);
+
+        _logger.LogInformation("MVP Prompt Master generated for project {ProjectId} ({Count} stages included)",
+            projectId, evaluatedTasks.Count);
+
+        // Retornar como texto/plain para facilitar cópia
+        return Content(promptMaster, "text/plain; charset=utf-8");
     }
 }
 

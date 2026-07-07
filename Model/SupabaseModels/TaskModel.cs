@@ -40,6 +40,14 @@ public class TaskModel : BaseModel
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; }
 
+    /// <summary>
+    /// Spec 023: preenchido quando uma etapa ANTERIOR foi editada/regenerada
+    /// após esta ter sido concluída (NULL = atual). A task continua 'evaluated';
+    /// só o badge "Desatualizada" muda. Limpo ao regenerar esta etapa.
+    /// </summary>
+    [Column("outdated_at")]
+    public DateTime? OutdatedAt { get; set; }
+
     // Navigation properties (ignored by serializer)
     [System.Text.Json.Serialization.JsonIgnore]
     [Newtonsoft.Json.JsonIgnore]

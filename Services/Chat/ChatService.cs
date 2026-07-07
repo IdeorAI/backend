@@ -14,6 +14,7 @@ public sealed class ChatService(
     IOptions<DeepSeekOptions> deepSeekOptions,
     IOptions<ChatOptions> chatOptions,
     IMemoryCache cache,
+    Supabase.Client supabase,
     ILogger<ChatService> logger) : IChatService
 {
     private static readonly string[] StageNames =
@@ -382,10 +383,13 @@ public sealed class ChatService(
         RefineSectionRequest request, string userId, CancellationToken ct)
     {
         // Rate limit já consumido atomicamente em ChatController via TryConsumeRateLimit.
+        // Spec 028 — injeta as tags de contexto (FOCO do projeto) para que o refine
+        // também fique ancorado e não derive de segmento.
+        var focusBlock = await BuildFocusBlockAsync(request.ProjectId, ct).ConfigureAwait(false);
         var systemPrompt =
             "Você é um especialista em validação de startups. Refine APENAS o texto da seção fornecida. " +
             "Retorne SOMENTE o texto refinado em markdown puro (sem JSON, sem aspas, sem ```). " +
-            "Mantenha o tom e formato. Aplique apenas as melhorias solicitadas.";
+            "Mantenha o tom e formato. Aplique apenas as melhorias solicitadas." + focusBlock;
 
         var userPrompt =
             $"Etapa: {request.StageName}\n" +
@@ -415,6 +419,32 @@ public sealed class ChatService(
         logger.LogDebug("[ChatService.RefineSection] OK — section={Section} user={UserId}",
             request.SectionKey, userId);
         return (refined, null);
+    }
+
+    /// <summary>
+    /// Spec 028 — lê as tags (keywords) do projeto e monta um bloco de FOCO para
+    /// ancorar o refine. Best-effort: nunca lança, retorna "" se não houver tags.
+    /// </summary>
+    private async Task<string> BuildFocusBlockAsync(string? projectId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) return string.Empty;
+        try
+        {
+            var resp = await supabase
+                .From<IdeorAI.Model.SupabaseModels.ProjectModel>()
+                .Filter("id", Supabase.Postgrest.Constants.Operator.Equals, projectId)
+                .Limit(1)
+                .Get();
+            var tags = (resp.Models?.FirstOrDefault()?.Keywords ?? new List<string>())
+                .Where(t => !string.IsNullOrWhiteSpace(t)).Take(10).ToList();
+            if (tags.Count == 0) return string.Empty;
+            return $" Mantenha o texto ancorado nestas palavras-chave do projeto (NÃO desvie delas): {string.Join(", ", tags)}.";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[ChatService] Falha ao buscar tags de foco (não crítico)");
+            return string.Empty;
+        }
     }
 
     private static string CleanRefinedText(string raw)

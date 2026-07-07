@@ -132,10 +132,23 @@ Retorne APENAS markdown, sem prefácio.
         foreach (var t in ordered)
         {
             if (string.IsNullOrWhiteSpace(t.Content)) continue;
+            // A task resumo_financeiro NÃO é uma "Etapa" — entra como bloco oficial separado abaixo.
+            if (string.Equals(t.Phase, "resumo_financeiro", StringComparison.OrdinalIgnoreCase)) continue;
             joined.AppendLine($"## Etapa {idx}");
             joined.AppendLine(t.Content);
             joined.AppendLine();
             idx++;
+        }
+
+        // Fonte de verdade financeira (Spec 022 v2): se houver Resumo Financeiro, injeta os
+        // valores oficiais para a LLM usar EXATAMENTE estes números, sem reinventar.
+        var financeiro = ordered.FirstOrDefault(t =>
+            string.Equals(t.Phase, "resumo_financeiro", StringComparison.OrdinalIgnoreCase));
+        var sintese = financeiro?.Content != null ? TryBuildSintese(financeiro.Content) : null;
+        if (sintese != null)
+        {
+            joined.AppendLine(BuildOfficialFinancialBlock(sintese));
+            joined.AppendLine();
         }
 
         var joinedContent = joined.ToString();
@@ -157,7 +170,10 @@ Retorne APENAS markdown, sem prefácio.
         _logger.LogInformation("[DocSynthesis] Gerando {DocType} para project {ProjectId}", docType, projectId);
         var llmResult = await _llmService.GenerateAsync(
             prompt,
-            new LlmOptions(SkipCentralMetrics: false),
+            new LlmOptions(
+                SkipCentralMetrics: false,
+                UserId: userId,
+                SourceContext: $"docsynth:{projectId}"),
             ct);
 
         var contentMd = llmResult.Text ?? string.Empty;
@@ -185,6 +201,7 @@ Retorne APENAS markdown, sem prefácio.
                 existingModel.ContentMd = contentMd;
                 existingModel.ModelUsed = modelUsed;
                 existingModel.GeneratedAt = DateTime.UtcNow;
+                existingModel.OutdatedAt = null; // regenerado → volta a "atual"
                 await existingModel.Update<GeneratedDocumentModel>();
             }
             else
@@ -205,5 +222,79 @@ Retorne APENAS markdown, sem prefácio.
             _logger.LogError(ex, "[DocSynthesis] Erro ao persistir documento {DocType} project {ProjectId}", docType, projectId);
             throw;
         }
+    }
+
+    /// <summary>Lê a síntese do content da task resumo_financeiro, ou recalcula da DRE.</summary>
+    private static Model.DTOs.FinancialSummaryDto? TryBuildSintese(string content)
+    {
+        var dre = DreCalculator.TryExtractDre(content);
+        return dre != null ? DreCalculator.ComputeSintese(dre.Value) : null;
+    }
+
+    /// <summary>
+    /// Bloco a ser injetado no prompt: instrui a LLM a usar EXATAMENTE estes números
+    /// financeiros (fonte de verdade = DRE editada pelo usuário), sem reinventar.
+    /// </summary>
+    private static string BuildOfficialFinancialBlock(Model.DTOs.FinancialSummaryDto s)
+    {
+        var ptBr = CultureInfo.GetCultureInfo("pt-BR");
+        // Formato anti-ambiguidade: valor numérico + extenso + escala explícita.
+        // A LLM costuma reinterpretar "R$ 10.800" como "R$ 10,8 milhões" (o ponto de
+        // milhar pt-BR vira gatilho de escala). Anexar o extenso e a escala remove o
+        // gatilho e dá uma âncora textual difícil de "corromper".
+        string Br(decimal v)
+        {
+            var num = v.ToString("C0", ptBr);                 // R$ 10.800
+            var ext = ValorPorExtenso(v);                      // "dez mil e oitocentos reais"
+            return $"{num} (exatamente {ext}; escala: {Escala(v)})";
+        }
+        var sb = new StringBuilder();
+        sb.AppendLine("## VALORES FINANCEIROS OFICIAIS (use EXATAMENTE estes — não invente nem reescale)");
+        sb.AppendLine("Projeção consolidada do primeiro ano (DRE validada pelo usuário):");
+        sb.AppendLine($"- Receita Bruta (anual): {Br(s.ReceitaBrutaAnual)}");
+        sb.AppendLine($"- Deduções e Impostos (anual): {Br(s.DeducoesAnual)}");
+        sb.AppendLine($"- Receita Líquida (anual): {Br(s.ReceitaLiquidaAnual)}");
+        sb.AppendLine($"- Lucro Bruto (anual): {Br(s.LucroBrutoAnual)}");
+        sb.AppendLine($"- Despesas Operacionais (média mensal): {Br(s.OpexMensalMedia)}");
+        sb.AppendLine($"- Lucro Líquido (anual): {Br(s.LucroLiquidoAnual)}");
+        sb.AppendLine();
+        sb.AppendLine("REGRAS OBRIGATÓRIAS ao citar qualquer número financeiro:");
+        sb.AppendLine("1. Copie o valor EXATO acima — NUNCA converta a escala (ex.: NÃO transforme 'mil' em 'milhões', nem arredonde 'R$ 10.800' para 'R$ 10,8 milhões').");
+        sb.AppendLine("2. O ponto é separador de MILHAR pt-BR: 'R$ 10.800' = dez mil e oitocentos reais, NÃO dez milhões e oitocentos mil.");
+        sb.AppendLine("3. Se um valor parecer baixo para o seu senso comum, MANTENHA-O assim mesmo — ele foi validado pelo usuário e é autoritativo.");
+        return sb.ToString();
+    }
+
+    /// <summary>Classifica a escala de um valor em reais (para reforço textual no prompt).</summary>
+    private static string Escala(decimal v)
+    {
+        var a = Math.Abs(v);
+        if (a >= 1_000_000_000m) return "bilhões de reais";
+        if (a >= 1_000_000m) return "milhões de reais";
+        if (a >= 1_000m) return "milhares de reais";
+        return "reais (valor abaixo de mil)";
+    }
+
+    /// <summary>Extenso simplificado em pt-BR até bilhões — só a magnitude principal,
+    /// suficiente para ancorar a escala e evitar reinterpretação da LLM.</summary>
+    private static string ValorPorExtenso(decimal v)
+    {
+        var a = Math.Abs(Math.Round(v));
+        if (a == 0) return "zero reais";
+        if (a < 1_000m) return $"{a:0} reais";
+        if (a < 1_000_000m)
+        {
+            var milhares = Math.Floor(a / 1_000m);
+            var resto = a - milhares * 1_000m;
+            return resto == 0 ? $"{milhares:0} mil reais" : $"{milhares:0} mil e {resto:0} reais";
+        }
+        if (a < 1_000_000_000m)
+        {
+            var milhoes = Math.Floor(a / 1_000_000m);
+            var restoMil = Math.Floor((a - milhoes * 1_000_000m) / 1_000m);
+            return restoMil == 0 ? $"{milhoes:0} milhões de reais" : $"{milhoes:0} milhões e {restoMil:0} mil reais";
+        }
+        var bilhoes = Math.Floor(a / 1_000_000_000m);
+        return $"{bilhoes:0} bilhões de reais";
     }
 }

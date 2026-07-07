@@ -247,6 +247,8 @@ Retorne JSON:
 
 **Ideia:** {ideia}
 {contextoSection}
+Em ""custo_desenvolvimento"" busque o MENOR custo viável para validar as hipóteses (não um produto completo): priorize no-code/low-code, ferramentas gratuitas/open-source, MVP manual ou freelancer único; estime o mínimo possível, na moeda R$.
+
 Retorne JSON com exatamente esta estrutura:
 ```json
 {{
@@ -268,12 +270,6 @@ Retorne JSON com exatamente esta estrutura:
     {{ ""mes"": 2, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }},
     {{ ""mes"": 3, ""objetivo"": ""[objetivo]"", ""entregas"": [""[entrega 1]""] }}
   ],
-  ""stack_tecnologica"": {{
-    ""frontend"": ""[tecnologia]"",
-    ""backend"": ""[tecnologia]"",
-    ""database"": ""[banco]"",
-    ""infra"": ""[cloud]""
-  }},
   ""metricas_validacao"": [
     {{ ""metrica"": ""[métrica de negócio]"", ""meta"": ""[valor]"", ""motivo"": ""[por que importa]"" }}
   ],

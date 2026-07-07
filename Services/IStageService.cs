@@ -59,6 +59,12 @@ public interface IStageService
     Task<bool> CanAdvanceToNextPhaseAsync(Guid projectId, Guid userId);
 
     /// <summary>
+    /// Spec 023: marca etapas posteriores concluídas como desatualizadas (outdated_at).
+    /// Não dispara IVO/Score. Retorna a quantidade marcada.
+    /// </summary>
+    Task<int> MarkLaterStagesOutdatedAsync(Guid projectId, int stageIndex);
+
+    /// <summary>
     /// Obtém a próxima etapa disponível para um projeto na fase2
     /// </summary>
     /// <param name="projectId">ID do projeto</param>

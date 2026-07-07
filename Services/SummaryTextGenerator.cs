@@ -40,22 +40,27 @@ public static class SummaryTextGenerator
                 parts.Add($"Problema: {GetStringValue(dor)}");
         }
 
-        // Público (agora dentro de sintese ou nivel raiz)
-        if (json.TryGetProperty("sintese", out var sintese))
-        {
-            if (sintese.TryGetProperty("publico_prioritario", out var publico))
-                parts.Add($"Público: {GetStringValue(publico)}");
-        }
+        // Bloco de síntese: prompt MINI usa "sintese", prompt COMPLETO usa "resumo_ideia".
+        // Aceita ambos para o summary funcionar nos dois modos.
+        JsonElement resumo = default;
+        var temResumo = json.TryGetProperty("sintese", out resumo)
+                        || json.TryGetProperty("resumo_ideia", out resumo);
+
+        // Público
+        if (temResumo && resumo.TryGetProperty("publico_prioritario", out var publico))
+            parts.Add($"Público: {GetStringValue(publico)}");
 
         // Personas
         if (json.TryGetProperty("personas", out var personas) && personas.ValueKind == JsonValueKind.Array)
             parts.Add($"Personas: {personas.GetArrayLength()}");
 
-        // Hipóteses (agora na sintese)
-        if (json.TryGetProperty("sintese", out var sintese2))
+        // Hipótese: MINI = "hipotese_monetizacao"; COMPLETO = "hipotese_proposta_valor".
+        if (temResumo)
         {
-            if (sintese2.TryGetProperty("hipotese_monetizacao", out var hipotese))
-                parts.Add($"Hipótese: {GetStringValue(hipotese)}");
+            if (resumo.TryGetProperty("hipotese_monetizacao", out var hipMon))
+                parts.Add($"Hipótese: {GetStringValue(hipMon)}");
+            else if (resumo.TryGetProperty("hipotese_proposta_valor", out var hipPv))
+                parts.Add($"Hipótese: {GetStringValue(hipPv)}");
         }
 
         return Truncate(string.Join(". ", parts));
@@ -184,12 +189,6 @@ public static class SummaryTextGenerator
         if (json.TryGetProperty("roadmap_3_meses", out var roadmap) && roadmap.ValueKind == JsonValueKind.Array)
         {
             parts.Add($"Roadmap: {roadmap.GetArrayLength()} meses");
-        }
-
-        // Stack
-        if (json.TryGetProperty("stack_tecnologica", out var stack))
-        {
-            parts.Add("Stack definida");
         }
 
         return Truncate(string.Join(". ", parts));

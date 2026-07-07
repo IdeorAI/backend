@@ -103,7 +103,7 @@ public class GoPivotService : IGoPivotService
             throw new InvalidOperationException("Dados insuficientes: conclua as Etapas 1 e 2 antes de avaliar.");
 
         var prompt = BuildPrompt(etapa1.SummaryText ?? "", etapa2.SummaryText ?? "");
-        var result = await CallLlmAsync(prompt);
+        var result = await CallLlmAsync(prompt, projectId, userId);
 
         var parsed = ParseVerdict(result.Text);
 
@@ -164,8 +164,10 @@ public class GoPivotService : IGoPivotService
     private string BuildPrompt(string etapa1Text, string etapa2Text) =>
         $"{SystemPrompt}\n\nCONTEXTO DA IDEIA:\n\n=== ETAPA 1 — Problema e Oportunidade ===\n{etapa1Text}\n\n=== ETAPA 2 — Validação de Mercado ===\n{etapa2Text}";
 
-    private Task<LlmResult> CallLlmAsync(string prompt)
-        => _llmFallbackService.GenerateAsync(prompt);
+    private Task<LlmResult> CallLlmAsync(string prompt, Guid projectId, Guid userId)
+        => _llmFallbackService.GenerateAsync(prompt, new LlmOptions(
+            UserId: userId.ToString(),
+            SourceContext: $"gopivot:{projectId}"));
 
     private static List<string> ReadStringArray(JsonElement root, string propertyName)
     {

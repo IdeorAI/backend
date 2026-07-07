@@ -257,6 +257,9 @@ public async Task<bool> UserHasAccessToProjectAsync(Guid userId, Guid projectId)
             GeneratedOptions = model.GeneratedOptions,
             ProductStructure = model.ProductStructure,
             TargetAudience = model.TargetAudience,
+            Region = model.Region,
+            Constraints = model.Constraints,
+            Keywords = model.Keywords,          // Spec 028 — tags de contexto
             CreatedAt = model.CreatedAt,
             UpdatedAt = model.UpdatedAt
         };

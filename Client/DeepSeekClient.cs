@@ -21,11 +21,15 @@ public sealed class DeepSeekClient(
         var opts = options ?? new LlmOptions();
         var sw = Stopwatch.StartNew();
 
+        // Roteamento híbrido: usa o modelo do override (LlmOptions.Model) se vier,
+        // senão o default global (DeepSeek:Model). Mesma API/key/endpoint.
+        var modelToUse = !string.IsNullOrWhiteSpace(opts.Model) ? opts.Model! : _opts.Model;
+
         var client = httpClientFactory.CreateClient("DeepSeek");
 
         var request = new
         {
-            model = _opts.Model,
+            model = modelToUse,
             messages = new[] { new { role = "user", content = prompt } },
             temperature = opts.Temperature,
             max_tokens = opts.MaxTokens,
@@ -83,7 +87,8 @@ public sealed class DeepSeekClient(
             if (choices.GetArrayLength() == 0)
                 throw new InvalidOperationException("[DeepSeek] 'choices' vazio na resposta.");
 
-            var contentEl = choices[0].GetProperty("message").GetProperty("content");
+            var message = choices[0].GetProperty("message");
+            var contentEl = message.GetProperty("content");
             var raw = LlmResponseParser.ExtractContent(contentEl);
             content = LlmResponseParser.StripCodeFences(raw);
 
@@ -92,6 +97,29 @@ public sealed class DeepSeekClient(
                 if (usage.TryGetProperty("prompt_tokens", out var pt)) inputTokens = pt.GetInt32();
                 if (usage.TryGetProperty("completion_tokens", out var ct2)) outputTokens = ct2.GetInt32();
             }
+
+            var truncated = choices[0].TryGetProperty("finish_reason", out var fr) &&
+                string.Equals(fr.GetString(), "length", StringComparison.OrdinalIgnoreCase);
+
+            // Modelos "thinking" (deepseek-v4-pro) às vezes gastam todo o orçamento de
+            // tokens no raciocínio e devolvem `content` VAZIO, pondo o texto útil em
+            // `reasoning_content`. Era a causa real do 400 intermitente na etapa4
+            // ("Conteúdo retornado está vazio"). Fallback: se content veio vazio mas há
+            // reasoning_content, tenta recuperar o JSON de lá.
+            if (string.IsNullOrWhiteSpace(content) &&
+                message.TryGetProperty("reasoning_content", out var reasoningEl) &&
+                reasoningEl.ValueKind == JsonValueKind.String)
+            {
+                var reasoning = reasoningEl.GetString() ?? string.Empty;
+                content = LlmResponseParser.ExtractEmbeddedJson(reasoning);
+                if (!string.IsNullOrWhiteSpace(content))
+                    logger.LogWarning("[DeepSeek] ⚠️ content vazio — JSON recuperado de reasoning_content (model={Model}, out={Out}t)",
+                        modelToUse, outputTokens);
+            }
+
+            if (truncated)
+                logger.LogWarning("[DeepSeek] ⚠️ Resposta TRUNCADA (finish_reason=length, model={Model}, out={Out}t). " +
+                    "Aumentar MaxTokens ou encurtar o prompt.", modelToUse, outputTokens);
         }
         catch (InvalidOperationException)
         {
@@ -108,8 +136,10 @@ public sealed class DeepSeekClient(
 
         sw.Stop();
         logger.LogInformation("[DeepSeek] ✅ {Model} — {In}t in, {Out}t out, {Ms}ms",
-            _opts.Model, inputTokens, outputTokens, sw.ElapsedMilliseconds);
+            modelToUse, inputTokens, outputTokens, sw.ElapsedMilliseconds);
 
-        return new LlmResult(content, inputTokens, outputTokens, _opts.Model, ProviderName, sw.ElapsedMilliseconds);
+        // Reporta o modelo REALMENTE usado (não o default), para a observabilidade
+        // (v_token_by_model) registrar o custo no modelo correto.
+        return new LlmResult(content, inputTokens, outputTokens, modelToUse, ProviderName, sw.ElapsedMilliseconds);
     }
 }

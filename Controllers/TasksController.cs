@@ -47,6 +47,26 @@ public class TasksController : ControllerBase
     }
 
     /// <summary>
+    /// Spec 023: marca as etapas posteriores concluídas como "Desatualizadas"
+    /// após o usuário editar manualmente a Etapa de índice {stageIndex}.
+    /// Só sinaliza (outdated_at); não regenera nem recalcula IVO/Score.
+    /// </summary>
+    [HttpPost("mark-outdated/{stageIndex:int}")]
+    public async Task<IActionResult> MarkOutdated(
+        Guid projectId,
+        int stageIndex,
+        [FromHeader(Name = "x-user-id")] Guid userId)
+    {
+        // Gate de ownership: GetProjectTasksAsync retorna null se não autorizado.
+        var tasks = await _stageService.GetProjectTasksAsync(projectId, userId);
+        if (tasks == null)
+            return NotFound(new { error = "Project not found or access denied" });
+
+        var marked = await _stageService.MarkLaterStagesOutdatedAsync(projectId, stageIndex);
+        return Ok(new { marked });
+    }
+
+    /// <summary>
     /// Obtém uma task específica por ID
     /// </summary>
     [HttpGet("~/api/tasks/{taskId}")]
@@ -149,7 +169,7 @@ public class TasksController : ControllerBase
     /// <summary>
     /// Obtém a próxima etapa disponível para um projeto
     /// </summary>
-    [HttpGet("~/api/projects/{projectId}/next-stage")]
+    [HttpGet("next-stage")]
     public async Task<ActionResult<object>> GetNextStage(
         Guid projectId,
         [FromHeader(Name = "x-user-id")] Guid userId)
@@ -169,7 +189,7 @@ public class TasksController : ControllerBase
     /// <summary>
     /// Verifica se o projeto pode avançar para a próxima fase
     /// </summary>
-    [HttpGet("~/api/projects/{projectId}/can-advance")]
+    [HttpGet("can-advance")]
     public async Task<ActionResult<object>> CanAdvance(
         Guid projectId,
         [FromHeader(Name = "x-user-id")] Guid userId)

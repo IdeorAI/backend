@@ -27,4 +27,11 @@ public class GeneratedDocumentModel : BaseModel
 
     [Column("generated_at")]
     public DateTime GeneratedAt { get; set; }
+
+    /// <summary>
+    /// Preenchido quando a DRE muda após a geração (documento defasado). Limpo
+    /// (null) ao regenerar. Spec 022.
+    /// </summary>
+    [Column("outdated_at")]
+    public DateTime? OutdatedAt { get; set; }
 }

@@ -257,7 +257,7 @@ APENAS JSON válido, sem markdown, sem prefácio.";
 
 **Ideia:** {ideia}
 {contextoSection}
-Regras: core_features máx 3-5 (cortar o que não testa hipótese), stack popular (não exótica), custos em R$ realistas para mercado BR.
+Regras: core_features máx 3-5 (cortar o que não testa hipótese), stack popular (não exótica), custos em R$ realistas para mercado BR. Em ""custo_desenvolvimento"": busque o MENOR custo viável — priorize no-code/low-code, ferramentas gratuitas/open-source, MVP manual ou freelancer único; estime o mínimo possível para validar as hipóteses, NÃO um produto completo.
 
 Retorne EXATAMENTE este JSON (todos os tópicos obrigatórios):
 ```json
@@ -275,12 +275,6 @@ Retorne EXATAMENTE este JSON (todos os tópicos obrigatórios):
   ""metricas_validacao"": [
     {{""metrica"":""nome"",""meta"":""valor"",""motivo"":""por que importa""}}
   ],
-  ""stack_tecnologica"": {{
-    ""frontend"": ""tech"",
-    ""backend"": ""tech"",
-    ""database"": ""tech"",
-    ""infra"": ""cloud""
-  }},
   ""custo_desenvolvimento"": {{
     ""estimativa_total"": ""R$ X"",
     ""tempo_estimado"": ""N meses"",
